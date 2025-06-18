@@ -16,7 +16,7 @@
 import tensorflow as tf
 
 
-def FocalLoss(gamma=1.2):
+def FocalLoss(gamma=2.0):
     def focal_loss(y_true, y_pred, sample_weight=None):
 
         # Trim down the indexes to only those that have a class label
