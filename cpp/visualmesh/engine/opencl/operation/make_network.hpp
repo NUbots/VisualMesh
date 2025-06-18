@@ -105,117 +105,166 @@ namespace engine {
                     /*************************************************
                      *                WEIGHTS + BIAS                 *
                      *************************************************/
+                    if (conv[layer_no].type == LayerType::STANDARD) {
+                        // Standard convolution
+                        // Now we have to do our layer operations
+                        for (unsigned int layer_no = 0; layer_no < conv.size(); ++layer_no) {
+                            const auto& weights    = conv[layer_no].weights;
+                            const auto& biases     = conv[layer_no].biases;
+                            const auto& activation = conv[layer_no].activation;
 
-                    // Now we have to do our layer operations
-                    for (unsigned int layer_no = 0; layer_no < conv.size(); ++layer_no) {
-                        const auto& weights    = conv[layer_no].weights;
-                        const auto& biases     = conv[layer_no].biases;
-                        const auto& activation = conv[layer_no].activation;
+                            // Update our output dimensions
+                            output_dimensions = biases.size();
 
-                        // Update our output dimensions
-                        output_dimensions = biases.size();
-
-                        // Perform the matrix multiplication
-                        code << "  // Perform our matrix multiplication for weights and add bias for layer " << layer_no
-                             << std::endl;
-                        code << "  Scalar in" << (layer_no + 1) << "[" << output_dimensions << "] = {" << std::endl;
-                        for (unsigned int i = 0; i < output_dimensions; ++i) {
-                            code << "    ";
-                            for (unsigned int j = 0; j < input_dimensions; ++j) {
-                                code << "in" << layer_no << "[" << j << "] * " << weights[j][i] << " + ";
+                            // Perform the matrix multiplication
+                            code << "  // Perform our matrix multiplication for weights and add bias for layer "
+                                 << layer_no << std::endl;
+                            code << "  Scalar in" << (layer_no + 1) << "[" << output_dimensions << "] = {" << std::endl;
+                            for (unsigned int i = 0; i < output_dimensions; ++i) {
+                                code << "    ";
+                                for (unsigned int j = 0; j < input_dimensions; ++j) {
+                                    code << "in" << layer_no << "[" << j << "] * " << weights[j][i] << " + ";
+                                }
+                                code << biases[i];
+                                if (i + 1 < output_dimensions) { code << ","; }
+                                code << std::endl;
                             }
-                            code << biases[i];
-                            if (i + 1 < output_dimensions) { code << ","; }
-                            code << std::endl;
+                            code << "  };" << std::endl << std::endl;
                         }
-                        code << "  };" << std::endl << std::endl;
+                        else {
+                            // Depthwise separable convolution
+                            // Now we have to do our layer operations
+                            for (unsigned int layer_no = 0; layer_no < conv.size(); ++layer_no) {
+                                const auto& depthwise_weights = conv[layer_no].depthwise_weights;
+                                const auto& pointwise_weights = conv[layer_no].pointwise_weights;
+                                const auto& pointwise_biases  = conv[layer_no].pointwise_biases;
+                                const auto& activation        = conv[layer_no].activation;
 
+                                // Update our output dimensions
+                                output_dimensions = pointwise_biases.size();
+
+                                // Perform the depthwise convolution
+                                code << "  // Perform our depthwise convolution for layer " << layer_no << std::endl;
+                                code << "  Scalar in" << (layer_no + 1) << "[" << input_dimensions << "] = {"
+                                     << std::endl;
+                                for (unsigned int i = 0; i < input_dimensions; ++i) {
+                                    code << "    ";
+                                    for (unsigned int j = 0; j < depthwise_weights[i].size(); ++j) {
+                                        code << "in" << layer_no << "[" << j << "] * " << depthwise_weights[i][j]
+                                             << " + ";
+                                    }
+                                    if (i + 1 < input_dimensions) { code << ","; }
+                                    code << std::endl;
+                                }
+                                code << "  };" << std::endl;
+
+                                // Now perform the pointwise convolution
+                                code << "  // Perform our pointwise convolution for layer " << layer_no << std::endl;
+                                code << "  Scalar in" << (layer_no + 1) << "[" << output_dimensions << "] = {"
+                                     << std::endl;
+                                for (unsigned int i = 0; i < output_dimensions; ++i) {
+                                    code << "    ";
+                                    for (unsigned int j = 0; j < input_dimensions; ++j) {
+                                        code << "in" << (layer_no + 1) << "[" << j << "] * "
+                                             << pointwise_weights[j][i] + pointwise_biases[i];
+                                        if (j + 1 < input_dimensions || i + 1 < output_dimensions) { code << ","; }
+                                        code << std::endl;
+                                    }
+                                }
+                                code << "  };" << std::endl;
+                            }
+
+                            /*************************************************
+                             *                  ACTIVATION.                  *
+                             *************************************************/
+
+                            // Apply our activation function
+                            code << "  // Apply the activation function" << std::endl;
+
+                            switch (activation) {
+                                case ActivationFunction::SELU: {
+                                    // selu constants
+                                    constexpr const Scalar lambda = 1.0507009873554804934193349852946;
+                                    constexpr const Scalar alpha  = 1.6732632423543772848170429916717;
+
+                                    code << "  // Apply selu" << std::endl;
+                                    for (unsigned int i = 0; i < output_dimensions; ++i) {
+                                        std::string e =
+                                          "in" + std::to_string(layer_no + 1) + "[" + std::to_string(i) + "]";
+                                        code << "  " << e << " = " << lambda << "f * (" << e << " > 0 ? " << e << " : "
+                                             << alpha << "f * exp(" << e << ") - " << alpha << "f);" << std::endl;
+                                    }
+                                } break;
+                                case ActivationFunction::RELU: {
+                                    code << "  // Apply relu" << std::endl;
+                                    for (unsigned int i = 0; i < output_dimensions; ++i) {
+                                        std::string e =
+                                          "in" + std::to_string(layer_no + 1) + "[" + std::to_string(i) + "]";
+                                        code << "  " << e << " = " << e << " > 0 ? " << e << " : 0;" << std::endl;
+                                    }
+                                } break;
+                                case ActivationFunction::TANH: {
+                                    code << "  // Apply tanh" << std::endl;
+                                    for (unsigned int i = 0; i < output_dimensions; ++i) {
+                                        std::string e =
+                                          "in" + std::to_string(layer_no + 1) + "[" + std::to_string(i) + "]";
+                                        code << "  " << e << " = tanh(" << e << ");" << std::endl;
+                                    }
+                                } break;
+                                case ActivationFunction::SOFTMAX: {
+                                    code << "  // Apply softmax" << std::endl;
+
+                                    // Apply exp to each of the elements
+                                    for (unsigned int i = 0; i < output_dimensions; ++i) {
+                                        std::string e =
+                                          "in" + std::to_string(layer_no + 1) + "[" + std::to_string(i) + "]";
+                                        code << "  " << e << " = exp(" << e << ");" << std::endl;
+                                    }
+
+                                    // Sum up all the values
+                                    code << "Scalar exp_sum = 0;" << std::endl;
+                                    for (unsigned int i = 0; i < output_dimensions; ++i) {
+                                        std::string e =
+                                          "in" + std::to_string(layer_no + 1) + "[" + std::to_string(i) + "]";
+                                        code << "  exp_sum += " << e << ";" << std::endl;
+                                    }
+
+                                    // Divide all the values
+                                    for (unsigned int i = 0; i < output_dimensions; ++i) {
+                                        std::string e =
+                                          "in" + std::to_string(layer_no + 1) + "[" + std::to_string(i) + "]";
+                                        code << "  " << e << " /= exp_sum;" << std::endl;
+                                    }
+                                } break;
+                            }
+
+                            code << std::endl;
+
+                            // Update our input size for the next loop
+                            input_dimensions = output_dimensions;
+                        }
 
                         /*************************************************
-                         *                  ACTIVATION.                  *
+                         *                    OUTPUT                     *
                          *************************************************/
-
-                        // Apply our activation function
-                        code << "  // Apply the activation function" << std::endl;
-
-                        switch (activation) {
-                            case ActivationFunction::SELU: {
-                                // selu constants
-                                constexpr const Scalar lambda = 1.0507009873554804934193349852946;
-                                constexpr const Scalar alpha  = 1.6732632423543772848170429916717;
-
-                                code << "  // Apply selu" << std::endl;
-                                for (unsigned int i = 0; i < output_dimensions; ++i) {
-                                    std::string e = "in" + std::to_string(layer_no + 1) + "[" + std::to_string(i) + "]";
-                                    code << "  " << e << " = " << lambda << "f * (" << e << " > 0 ? " << e << " : "
-                                         << alpha << "f * exp(" << e << ") - " << alpha << "f);" << std::endl;
-                                }
-                            } break;
-                            case ActivationFunction::RELU: {
-                                code << "  // Apply relu" << std::endl;
-                                for (unsigned int i = 0; i < output_dimensions; ++i) {
-                                    std::string e = "in" + std::to_string(layer_no + 1) + "[" + std::to_string(i) + "]";
-                                    code << "  " << e << " = " << e << " > 0 ? " << e << " : 0;" << std::endl;
-                                }
-                            } break;
-                            case ActivationFunction::TANH: {
-                                code << "  // Apply tanh" << std::endl;
-                                for (unsigned int i = 0; i < output_dimensions; ++i) {
-                                    std::string e = "in" + std::to_string(layer_no + 1) + "[" + std::to_string(i) + "]";
-                                    code << "  " << e << " = tanh(" << e << ");" << std::endl;
-                                }
-                            } break;
-                            case ActivationFunction::SOFTMAX: {
-                                code << "  // Apply softmax" << std::endl;
-
-                                // Apply exp to each of the elements
-                                for (unsigned int i = 0; i < output_dimensions; ++i) {
-                                    std::string e = "in" + std::to_string(layer_no + 1) + "[" + std::to_string(i) + "]";
-                                    code << "  " << e << " = exp(" << e << ");" << std::endl;
-                                }
-
-                                // Sum up all the values
-                                code << "Scalar exp_sum = 0;" << std::endl;
-                                for (unsigned int i = 0; i < output_dimensions; ++i) {
-                                    std::string e = "in" + std::to_string(layer_no + 1) + "[" + std::to_string(i) + "]";
-                                    code << "  exp_sum += " << e << ";" << std::endl;
-                                }
-
-                                // Divide all the values
-                                for (unsigned int i = 0; i < output_dimensions; ++i) {
-                                    std::string e = "in" + std::to_string(layer_no + 1) + "[" + std::to_string(i) + "]";
-                                    code << "  " << e << " /= exp_sum;" << std::endl;
-                                }
-                            } break;
+                        code << "  // Save our value to the output" << std::endl;
+                        for (unsigned int i = 0; i < input_dimensions; ++i) {
+                            code << "  output[idx * " << input_dimensions << " + " << i << "] = in" << conv.size()
+                                 << "[" << i << "];" << std::endl;
                         }
 
-                        code << std::endl;
+                        code << "}" << std::endl << std::endl;
 
-                        // Update our input size for the next loop
+                        // Update our input dimensions for the next round
                         input_dimensions = output_dimensions;
                     }
 
-                    /*************************************************
-                     *                    OUTPUT                     *
-                     *************************************************/
-                    code << "  // Save our value to the output" << std::endl;
-                    for (unsigned int i = 0; i < input_dimensions; ++i) {
-                        code << "  output[idx * " << input_dimensions << " + " << i << "] = in" << conv.size() << "["
-                             << i << "];" << std::endl;
-                    }
-
-                    code << "}" << std::endl << std::endl;
-
-                    // Update our input dimensions for the next round
-                    input_dimensions = output_dimensions;
+                    return code.str();
                 }
 
-                return code.str();
-            }
-
-        }  // namespace operation
-    }      // namespace opencl
-}  // namespace engine
+            }  // namespace operation
+        }      // namespace opencl
+    }          // namespace engine
 }  // namespace visualmesh
 
 #endif  // VISUALMESH_OPENCL_OPERATION_MAKE_NETWORK_HPP

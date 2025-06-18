@@ -41,11 +41,26 @@ visualmesh::NetworkStructure<Scalar> load_model(const std::string& path) {
         auto& net_conv = model.back();
 
         for (const auto& layer : conv) {
-            net_conv.emplace_back(visualmesh::Layer<Scalar>{
-              layer["weights"].as<std::vector<std::vector<Scalar>>>(),
-              layer["biases"].as<std::vector<Scalar>>(),
-              activation_function(layer["activation"].as<std::string>()),
-            });
+            // Default to STANDARD if not present
+            std::string type = layer["type"] ? layer["type"].as<std::string>() : "standard";
+            if (type == "standard") {
+                net_conv.emplace_back(
+                  visualmesh::Layer<Scalar>{layer["weights"].as<std::vector<std::vector<Scalar>>>(),
+                                            layer["biases"].as<std::vector<Scalar>>(),
+                                            activation_function(layer["activation"].as<std::string>()),
+                                            visualmesh::LayerType::STANDARD});
+            }
+            else if (type == "depthwise_separable") {
+                net_conv.emplace_back(
+                  visualmesh::Layer<Scalar>{{},  // weights (not used)
+                                            {},  // biases (not used)
+                                            activation_function(layer["activation"].as<std::string>()),
+                                            visualmesh::LayerType::DEPTHWISE_SEPARABLE,
+                                            layer["depthwise_weights"].as<std::vector<std::vector<Scalar>>>(),
+                                            layer["pointwise_weights"].as<std::vector<std::vector<Scalar>>>(),
+                                            layer["pointwise_biases"].as<std::vector<Scalar>>()});
+            }
+            else { throw std::runtime_error("Unknown layer type: " + type); }
         }
     }
     return model;

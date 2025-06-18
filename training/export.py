@@ -23,6 +23,7 @@ import tensorflow as tf
 from .dataset import keras_dataset
 from .flavour import Dataset
 from .layer.graph_convolution import GraphConvolution
+from .layer.depthwise_seperable_graph_convolution import DepthwiseSeparableGraphConvolution
 from .model import VisualMeshModel
 
 
@@ -56,28 +57,43 @@ def export(config, output_path):
     for m in model.stages:
         op = model.ops[m]
 
-        if type(op[0]) is GraphConvolution:
+        if isinstance(op[0], GraphConvolution):
             op = op[0]
             stages.append(
                 [
                     {
+                        "type": "standard",
                         "weights": op.dense.weights[0].numpy().tolist(),
                         "biases": op.dense.weights[1].numpy().tolist(),
                         "activation": op.dense.activation.__name__,
                     }
                 ]
             )
-        elif type(op[0]) is tf.keras.layers.Dense:
+        elif isinstance(op[0], DepthwiseSeparableGraphConvolution):
+            op = op[0]
+            stages.append(
+                [
+                    {
+                        "type": "depthwise_separable",
+                        "depthwise_weights": op.depthwise.depthwise_weights.numpy().tolist(),
+                        "pointwise_weights": op.depthwise.pointwise.weights[0].numpy().tolist(),
+                        "pointwise_biases": op.depthwise.pointwise.weights[1].numpy().tolist(),
+                        "activation": op.depthwise.pointwise.activation.__name__,
+                    }
+                ]
+            )
+        elif isinstance(op[0], tf.keras.layers.Dense):
             op = op[0]
             stages[-1].append(
                 {
+                    "type": "dense",
                     "weights": op.weights[0].numpy().tolist(),
                     "biases": op.weights[1].numpy().tolist(),
                     "activation": op.activation.__name__,
                 }
             )
         else:
-            print("Error: currently we can only export GraphConvolution and Dense layers")
+            print(f"Error: cannot export layer of type {type(op[0])}")
             exit(1)
 
     # While we have a 3 values on our input, all the c++ take 4 due to alignment issues

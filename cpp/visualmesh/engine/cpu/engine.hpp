@@ -236,23 +236,60 @@ namespace engine {
 
                     // For each network layer
                     for (unsigned int layer_no = 0; layer_no < conv.size(); ++layer_no) {
-                        const auto& weights    = conv[layer_no].weights;
-                        const auto& biases     = conv[layer_no].biases;
-                        const auto& activation = conv[layer_no].activation;
+                        if (conv[layer_no].type == LayerType::STANDARD) {
+                            const auto& weights    = conv[layer_no].weights;
+                            const auto& biases     = conv[layer_no].biases;
+                            const auto& activation = conv[layer_no].activation;
 
-                        // Setup the shapes
-                        output_dimensions = biases.size();
-                        output.resize(0);
-                        output.reserve(n_points * output_dimensions);
+                            // Setup the shapes
+                            output_dimensions = biases.size();
+                            output.resize(0);
+                            output.reserve(n_points * output_dimensions);
 
-                        // Apply the weights and bias
-                        auto in_point = input.begin();
-                        for (unsigned int i = 0; i < n_points; ++i) {
-                            for (unsigned int j = 0; j < output_dimensions; ++j) {
-                                output.emplace_back(std::inner_product(
-                                  in_point, in_point + input_dimensions, weights[j].begin(), biases[j]));
+                            // Apply the weights and bias
+                            auto in_point = input.begin();
+                            for (unsigned int i = 0; i < n_points; ++i) {
+                                for (unsigned int j = 0; j < output_dimensions; ++j) {
+                                    output.emplace_back(std::inner_product(
+                                      in_point, in_point + input_dimensions, weights[j].begin(), biases[j]));
+                                }
+                                in_point += input_dimensions;
                             }
-                            in_point += input_dimensions;
+                        }
+                        else {
+                            // Depthwise separable convolution
+                            const auto& depthwise_weights = conv[layer_no].depthwise_weights;
+                            const auto& pointwise_weights = conv[layer_no].pointwise_weights;
+                            const auto& pointwise_biases  = conv[layer_no].pointwise_biases;
+                            const auto& activation        = conv[layer_no].activation;
+
+                            // Update our output dimensions
+                            output_dimensions = pointwise_biases.size();
+                            output.resize(0);
+                            output.reserve(n_points * output_dimensions);
+
+                            // Perform the depthwise convolution
+                            for (unsigned int i = 0; i < n_points; ++i) {
+                                for (unsigned int j = 0; j < input_dimensions; ++j) {
+                                    Scalar sum = 0;
+                                    for (unsigned int k = 0; k < depthwise_weights[j].size(); ++k) {
+                                        sum += input[i * input_dimensions + k] * depthwise_weights[j][k];
+                                    }
+                                    output.emplace_back(sum);
+                                }
+                            }
+
+                            // Now perform the pointwise convolution
+                            in_point = output.begin();
+                            for (unsigned int i = 0; i < n_points; ++i) {
+                                for (unsigned int j = 0; j < output_dimensions; ++j) {
+                                    output.emplace_back(std::inner_product(in_point,
+                                                                           in_point + input_dimensions,
+                                                                           pointwise_weights[j].begin(),
+                                                                           pointwise_biases[j]));
+                                }
+                                in_point += input_dimensions;
+                            }
                         }
 
                         // Apply the activation function

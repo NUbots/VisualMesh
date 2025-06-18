@@ -22,6 +22,8 @@
 
 namespace visualmesh {
 
+enum LayerType { STANDARD, DEPTHWISE_SEPARABLE };
+
 /// Weights are a matrix (vector of vectors)
 template <typename Scalar>
 using Weights = std::vector<std::vector<Scalar>>;
@@ -39,8 +41,17 @@ enum ActivationFunction {
 /// A layer is made up of weights biases and activation function
 template <typename Scalar>
 struct Layer {
+    LayerType type = STANDARD;
+
+    // Standard layer
     Weights<Scalar> weights;
     Biases<Scalar> biases;
+
+    // Depthwise separable
+    Weights<Scalar> depthwise_weights;
+    Weights<Scalar> pointwise_weights;
+    Biases<Scalar> pointwise_biases;
+
     ActivationFunction activation;
 };
 
