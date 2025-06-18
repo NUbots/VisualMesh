@@ -1,4 +1,4 @@
-# Copyright (C) 2017-2020 Trent Houliston <trent@houliston.me>
+# Copyright (C) 2025 NUbots
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
 # documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
@@ -15,23 +15,9 @@
 
 import tensorflow as tf
 
-
-def FocalLoss(gamma=1.2):
-    def focal_loss(y_true, y_pred, sample_weight=None):
-
-        # Trim down the indexes to only those that have a class label
-        idx = tf.squeeze(tf.where(tf.reduce_any(tf.greater(y_true, 0.0), axis=-1)), axis=-1)
-        y_true = tf.gather(y_true, idx)
-        y_pred = tf.gather(y_pred, idx)
-
-        # Calculate the class weights required to balance the output
-        C = tf.math.reduce_sum(y_true, axis=0, keepdims=True)
-        C = tf.math.divide_no_nan(tf.math.reduce_max(C), C)
-
-        # Calculate focal loss
-        p_t = tf.where(tf.equal(y_true, 1.0), y_pred, 1.0 - y_pred)
-        loss = tf.reduce_sum(tf.multiply(C, -tf.math.pow((1.0 - p_t), gamma) * tf.math.log(p_t)), axis=-1)
-
-        return loss
-
-    return focal_loss
+def FocalTversky(y_true, y_pred, alpha=0.7, beta=0.3, gamma=0.75):
+    TP = tf.reduce_sum(y_true * y_pred)
+    FP = tf.reduce_sum((1 - y_true) * y_pred)
+    FN = tf.reduce_sum(y_true * (1 - y_pred))
+    tversky = (TP + 1e-6) / (TP + alpha * FP + beta * FN + 1e-6)
+    return tf.pow(1 - tversky, gamma)

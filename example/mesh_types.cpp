@@ -68,47 +68,47 @@ int main() {
     std::string image_path = "../example/images";
 
     // Create windows
-    cv::namedWindow("Ring 4", cv::WINDOW_AUTOSIZE);
+    // cv::namedWindow("Ring 4", cv::WINDOW_AUTOSIZE);
     cv::namedWindow("Ring 6", cv::WINDOW_AUTOSIZE);
-    cv::namedWindow("Ring 8", cv::WINDOW_AUTOSIZE);
-    cv::namedWindow("XM Grid 4", cv::WINDOW_AUTOSIZE);
-    cv::namedWindow("XM Grid 6", cv::WINDOW_AUTOSIZE);
-    cv::namedWindow("XM Grid 8", cv::WINDOW_AUTOSIZE);
-    cv::namedWindow("XY Grid 4", cv::WINDOW_AUTOSIZE);
-    cv::namedWindow("XY Grid 6", cv::WINDOW_AUTOSIZE);
-    cv::namedWindow("XY Grid 8", cv::WINDOW_AUTOSIZE);
-    cv::namedWindow("NM Grid 4", cv::WINDOW_AUTOSIZE);
-    cv::namedWindow("NM Grid 6", cv::WINDOW_AUTOSIZE);
-    cv::namedWindow("NM Grid 8", cv::WINDOW_AUTOSIZE);
+    // cv::namedWindow("Ring 8", cv::WINDOW_AUTOSIZE);
+    // cv::namedWindow("XM Grid 4", cv::WINDOW_AUTOSIZE);
+    // cv::namedWindow("XM Grid 6", cv::WINDOW_AUTOSIZE);
+    // cv::namedWindow("XM Grid 8", cv::WINDOW_AUTOSIZE);
+    // cv::namedWindow("XY Grid 4", cv::WINDOW_AUTOSIZE);
+    // cv::namedWindow("XY Grid 6", cv::WINDOW_AUTOSIZE);
+    // cv::namedWindow("XY Grid 8", cv::WINDOW_AUTOSIZE);
+    // cv::namedWindow("NM Grid 4", cv::WINDOW_AUTOSIZE);
+    // cv::namedWindow("NM Grid 6", cv::WINDOW_AUTOSIZE);
+    // cv::namedWindow("NM Grid 8", cv::WINDOW_AUTOSIZE);
 
     visualmesh::geometry::Sphere<Scalar> sphere(0.0949996);
 
     // Build meshes
     Timer t;
-    visualmesh::VisualMesh<Scalar, visualmesh::model::Ring4> ring4(sphere, 0.5, 1.5, 4, 0.5, 20);
-    t.measure("Built Ring 4");
+    // visualmesh::VisualMesh<Scalar, visualmesh::model::Ring4> ring4(sphere, 0.5, 1.5, 4, 0.5, 20);
+    // t.measure("Built Ring 4");
     visualmesh::VisualMesh<Scalar, visualmesh::model::Ring6> ring6(sphere, 0.5, 1.5, 4, 0.5, 20);
     t.measure("Built Ring 6");
-    visualmesh::VisualMesh<Scalar, visualmesh::model::Ring8> ring8(sphere, 0.5, 1.5, 4, 0.5, 20);
-    t.measure("Built Ring 8");
-    visualmesh::VisualMesh<Scalar, visualmesh::model::XMGrid4> xmgrid4(sphere, 0.5, 1.5, 4, 0.5, 20);
-    t.measure("Built XM Grid 4");
-    visualmesh::VisualMesh<Scalar, visualmesh::model::XMGrid6> xmgrid6(sphere, 0.5, 1.5, 4, 0.5, 20);
-    t.measure("Built XM Grid 6");
-    visualmesh::VisualMesh<Scalar, visualmesh::model::XMGrid8> xmgrid8(sphere, 0.5, 1.5, 4, 0.5, 20);
-    t.measure("Built XM Grid 8");
-    visualmesh::VisualMesh<Scalar, visualmesh::model::XYGrid4> xygrid4(sphere, 0.5, 1.5, 4, 0.5, 20);
-    t.measure("Built XY Grid 4");
-    visualmesh::VisualMesh<Scalar, visualmesh::model::XYGrid6> xygrid6(sphere, 0.5, 1.5, 4, 0.5, 20);
-    t.measure("Built XY Grid 6");
-    visualmesh::VisualMesh<Scalar, visualmesh::model::XYGrid8> xygrid8(sphere, 0.5, 1.5, 4, 0.5, 20);
-    t.measure("Built XY Grid 8");
-    visualmesh::VisualMesh<Scalar, visualmesh::model::NMGrid4> nmgrid4(sphere, 0.5, 1.5, 4, 0.5, 20);
-    t.measure("Built NM Grid 4");
-    visualmesh::VisualMesh<Scalar, visualmesh::model::NMGrid6> nmgrid6(sphere, 0.5, 1.5, 4, 0.5, 20);
-    t.measure("Built NM Grid 6");
-    visualmesh::VisualMesh<Scalar, visualmesh::model::NMGrid8> nmgrid8(sphere, 0.5, 1.5, 4, 0.5, 20);
-    t.measure("Built NM Grid 8");
+    // visualmesh::VisualMesh<Scalar, visualmesh::model::Ring8> ring8(sphere, 0.5, 1.5, 4, 0.5, 20);
+    // t.measure("Built Ring 8");
+    // visualmesh::VisualMesh<Scalar, visualmesh::model::XMGrid4> xmgrid4(sphere, 0.5, 1.5, 4, 0.5, 20);
+    // t.measure("Built XM Grid 4");
+    // visualmesh::VisualMesh<Scalar, visualmesh::model::XMGrid6> xmgrid6(sphere, 0.5, 1.5, 4, 0.5, 20);
+    // t.measure("Built XM Grid 6");
+    // visualmesh::VisualMesh<Scalar, visualmesh::model::XMGrid8> xmgrid8(sphere, 0.5, 1.5, 4, 0.5, 20);
+    // t.measure("Built XM Grid 8");
+    // visualmesh::VisualMesh<Scalar, visualmesh::model::XYGrid4> xygrid4(sphere, 0.5, 1.5, 4, 0.5, 20);
+    // t.measure("Built XY Grid 4");
+    // visualmesh::VisualMesh<Scalar, visualmesh::model::XYGrid6> xygrid6(sphere, 0.5, 1.5, 4, 0.5, 20);
+    // t.measure("Built XY Grid 6");
+    // visualmesh::VisualMesh<Scalar, visualmesh::model::XYGrid8> xygrid8(sphere, 0.5, 1.5, 4, 0.5, 20);
+    // t.measure("Built XY Grid 8");
+    // visualmesh::VisualMesh<Scalar, visualmesh::model::NMGrid4> nmgrid4(sphere, 0.5, 1.5, 4, 0.5, 20);
+    // t.measure("Built NM Grid 4");
+    // visualmesh::VisualMesh<Scalar, visualmesh::model::NMGrid6> nmgrid6(sphere, 0.5, 1.5, 4, 0.5, 20);
+    // t.measure("Built NM Grid 6");
+    // visualmesh::VisualMesh<Scalar, visualmesh::model::NMGrid8> nmgrid8(sphere, 0.5, 1.5, 4, 0.5, 20);
+    // t.measure("Built NM Grid 8");
 
     // Build engines
     Engine<Scalar> engine;
@@ -117,18 +117,18 @@ int main() {
     auto dataset = load_dataset<Scalar>(image_path);
 
     for (const auto& element : dataset) {
-        draw("Ring 4", element.image, engine(ring4, element.Hoc, element.lens), cv::Scalar(255, 255, 255));
+        // draw("Ring 4", element.image, engine(ring4, element.Hoc, element.lens), cv::Scalar(255, 255, 255));
         draw("Ring 6", element.image, engine(ring6, element.Hoc, element.lens), cv::Scalar(255, 255, 255));
-        draw("Ring 8", element.image, engine(ring8, element.Hoc, element.lens), cv::Scalar(255, 255, 255));
-        draw("XM Grid 4", element.image, engine(xmgrid4, element.Hoc, element.lens), cv::Scalar(255, 255, 255));
-        draw("XM Grid 6", element.image, engine(xmgrid6, element.Hoc, element.lens), cv::Scalar(255, 255, 255));
-        draw("XM Grid 8", element.image, engine(xmgrid8, element.Hoc, element.lens), cv::Scalar(255, 255, 255));
-        draw("XY Grid 4", element.image, engine(xygrid4, element.Hoc, element.lens), cv::Scalar(255, 255, 255));
-        draw("XY Grid 6", element.image, engine(xygrid6, element.Hoc, element.lens), cv::Scalar(255, 255, 255));
-        draw("XY Grid 8", element.image, engine(xygrid8, element.Hoc, element.lens), cv::Scalar(255, 255, 255));
-        draw("NM Grid 4", element.image, engine(nmgrid4, element.Hoc, element.lens), cv::Scalar(255, 255, 255));
-        draw("NM Grid 6", element.image, engine(nmgrid6, element.Hoc, element.lens), cv::Scalar(255, 255, 255));
-        draw("NM Grid 8", element.image, engine(nmgrid8, element.Hoc, element.lens), cv::Scalar(255, 255, 255));
+        // draw("Ring 8", element.image, engine(ring8, element.Hoc, element.lens), cv::Scalar(255, 255, 255));
+        // draw("XM Grid 4", element.image, engine(xmgrid4, element.Hoc, element.lens), cv::Scalar(255, 255, 255));
+        // draw("XM Grid 6", element.image, engine(xmgrid6, element.Hoc, element.lens), cv::Scalar(255, 255, 255));
+        // draw("XM Grid 8", element.image, engine(xmgrid8, element.Hoc, element.lens), cv::Scalar(255, 255, 255));
+        // draw("XY Grid 4", element.image, engine(xygrid4, element.Hoc, element.lens), cv::Scalar(255, 255, 255));
+        // draw("XY Grid 6", element.image, engine(xygrid6, element.Hoc, element.lens), cv::Scalar(255, 255, 255));
+        // draw("XY Grid 8", element.image, engine(xygrid8, element.Hoc, element.lens), cv::Scalar(255, 255, 255));
+        // draw("NM Grid 4", element.image, engine(nmgrid4, element.Hoc, element.lens), cv::Scalar(255, 255, 255));
+        // draw("NM Grid 6", element.image, engine(nmgrid6, element.Hoc, element.lens), cv::Scalar(255, 255, 255));
+        // draw("NM Grid 8", element.image, engine(nmgrid8, element.Hoc, element.lens), cv::Scalar(255, 255, 255));
         if (char(cv::waitKey(0)) == 27) { break; }
     }
 

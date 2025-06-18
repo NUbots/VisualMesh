@@ -15,3 +15,4 @@
 
 from .focal_loss import FocalLoss
 from .seeker_loss import SeekerLoss
+from .focal_tversky import FocalTversky
