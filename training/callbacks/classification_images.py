@@ -84,7 +84,7 @@ class ClassificationImages(tf.keras.callbacks.Callback):
                         C[:, 1],
                         C[:, 0],
                         X[:, i],
-                        levels=[0.2, 0.5, 0.7],
+                        levels=[0.4, 0.6, 0.8],
                         colors=[(*colour, 0.33), (*colour, 0.66), (*colour, 1.0)],
                     )
 
