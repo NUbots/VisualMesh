@@ -63,15 +63,8 @@ def make_tfrecord(output_file, input_files):
             )
 
 
-if __name__ == "__main__":
-
-    # Parse our command line arguments
-    command = argparse.ArgumentParser(description="Utility for training a Visual Mesh network")
-    command.add_argument("input_path", action="store", help="Path to the input files")
-    command.add_argument("output_path", action="store", help="Path to place the output tfrecord files")
-    args = command.parse_args()
-    input_path = args.input_path
-    output_path = args.output_path
+def process_folder(input_path):
+    """Process a single folder and return the files split into training, validation, and test sets."""
 
     image_files = glob(os.path.join(input_path, "image*.jpg"))
     mask_files = glob(os.path.join(input_path, "mask*.png"))
@@ -97,17 +90,58 @@ if __name__ == "__main__":
 
     nf = len(files)
 
-    training = 0.45
-    validation = 0.10
+    # Define split ratios
+    training_ratio = 0.45
+    validation_ratio = 0.10
 
-    test = (round(nf * (training + validation)), nf)
-    validation = (round(nf * training), round(nf * (training + validation)))
-    training = (0, round(nf * training))
+    # Calculate indices for splits
+    training_end = round(nf * training_ratio)
+    validation_end = round(nf * (training_ratio + validation_ratio))
+
+    # Split the files
+    training_files = files[0:training_end]
+    validation_files = files[training_end:validation_end]
+    test_files = files[validation_end:nf]
+
+    return training_files, validation_files, test_files
+
+
+if __name__ == "__main__":
+
+    # Parse our command line arguments
+    command = argparse.ArgumentParser(description="Utility for training a Visual Mesh network")
+    command.add_argument("input_paths", nargs='+', help="Path(s) to the input folders")
+    command.add_argument("output_path", action="store", help="Path to place the output tfrecord files")
+    args = command.parse_args()
+    input_paths = args.input_paths
+    output_path = args.output_path
+
+    # Process each input folder and collect files
+    all_training_files = []
+    all_validation_files = []
+    all_test_files = []
+
+    for input_path in input_paths:
+        print(f"Processing folder: {input_path}")
+        training_files, validation_files, test_files = process_folder(input_path)
+
+        all_training_files.extend(training_files)
+        all_validation_files.extend(validation_files)
+        all_test_files.extend(test_files)
+
+        print(f"  Training: {len(training_files)} files")
+        print(f"  Validation: {len(validation_files)} files")
+        print(f"  Test: {len(test_files)} files")
+
+    print(f"\nTotal files:")
+    print(f"  Training: {len(all_training_files)} files")
+    print(f"  Validation: {len(all_validation_files)} files")
+    print(f"  Test: {len(all_test_files)} files")
 
     # Create the output folder
     os.makedirs(output_path, exist_ok=True)
 
     # Create the three datasets
-    make_tfrecord(os.path.join(output_path, "training.tfrecord"), files[training[0] : training[1]])
-    make_tfrecord(os.path.join(output_path, "validation.tfrecord"), files[validation[0] : validation[1]])
-    make_tfrecord(os.path.join(output_path, "testing.tfrecord"), files[test[0] : test[1]])
+    make_tfrecord(os.path.join(output_path, "training.tfrecord"), all_training_files)
+    make_tfrecord(os.path.join(output_path, "validation.tfrecord"), all_validation_files)
+    make_tfrecord(os.path.join(output_path, "testing.tfrecord"), all_test_files)
