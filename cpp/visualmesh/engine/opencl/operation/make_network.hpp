@@ -124,9 +124,19 @@ namespace engine {
                             for (unsigned int i = 0; i < output_dimensions; ++i) {
                                 code << "    ";
                                 for (unsigned int j = 0; j < input_dimensions; ++j) {
-                                    code << "in" << layer_no << "[" << j << "] * " << weights[j][i] << " + ";
+                                    // Safety check for standard weights bounds
+                                    if (j < weights.size() && i < weights[j].size()) {
+                                        code << "in" << layer_no << "[" << j << "] * " << weights[j][i] << " + ";
+                                    } else {
+                                        code << "0.0 + ";
+                                    }
                                 }
-                                code << biases[i];
+                                // Safety check for bias bounds
+                                if (i < biases.size()) {
+                                    code << biases[i];
+                                } else {
+                                    code << "0.0";
+                                }
                                 if (i + 1 < output_dimensions) { code << ","; }
                                 code << std::endl;
                             }
@@ -269,7 +279,14 @@ namespace engine {
                         input_dimensions = output_dimensions;
                     }
 
-                    return code.str();
+                    std::string kernel_code = code.str();
+
+                    // Debug: Print generated kernel code if it contains depthwise
+                    if (has_depthwise) {
+                        std::cerr << "DEBUG: Generated OpenCL kernel code:\n" << kernel_code << std::endl;
+                    }
+
+                    return kernel_code;
                 }
 
             }  // namespace operation
