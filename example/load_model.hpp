@@ -45,20 +45,23 @@ visualmesh::NetworkStructure<Scalar> load_model(const std::string& path) {
             std::string type = layer["type"] ? layer["type"].as<std::string>() : "standard";
             if (type == "standard") {
                 net_conv.emplace_back(
-                  visualmesh::Layer<Scalar>{layer["weights"].as<std::vector<std::vector<Scalar>>>(),
+                  visualmesh::Layer<Scalar>{visualmesh::LayerType::STANDARD,
+                                            layer["weights"].as<std::vector<std::vector<Scalar>>>(),
                                             layer["biases"].as<std::vector<Scalar>>(),
-                                            activation_function(layer["activation"].as<std::string>()),
-                                            visualmesh::LayerType::STANDARD});
+                                            {},  // depthwise_weights (not used)
+                                            {},  // pointwise_weights (not used)
+                                            {},  // pointwise_biases (not used)
+                                            activation_function(layer["activation"].as<std::string>())});
             }
             else if (type == "depthwise_separable") {
                 net_conv.emplace_back(
-                  visualmesh::Layer<Scalar>{{},  // weights (not used)
+                  visualmesh::Layer<Scalar>{visualmesh::LayerType::DEPTHWISE_SEPARABLE,
+                                            {},  // weights (not used)
                                             {},  // biases (not used)
-                                            activation_function(layer["activation"].as<std::string>()),
-                                            visualmesh::LayerType::DEPTHWISE_SEPARABLE,
                                             layer["depthwise_weights"].as<std::vector<std::vector<Scalar>>>(),
                                             layer["pointwise_weights"].as<std::vector<std::vector<Scalar>>>(),
-                                            layer["pointwise_biases"].as<std::vector<Scalar>>()});
+                                            layer["pointwise_biases"].as<std::vector<Scalar>>(),
+                                            activation_function(layer["activation"].as<std::string>())});
             }
             else { throw std::runtime_error("Unknown layer type: " + type); }
         }

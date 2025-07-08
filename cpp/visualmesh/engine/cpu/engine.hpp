@@ -280,7 +280,7 @@ namespace engine {
                             }
 
                             // Now perform the pointwise convolution
-                            in_point = output.begin();
+                            auto in_point = output.begin();
                             for (unsigned int i = 0; i < n_points; ++i) {
                                 for (unsigned int j = 0; j < output_dimensions; ++j) {
                                     output.emplace_back(std::inner_product(in_point,

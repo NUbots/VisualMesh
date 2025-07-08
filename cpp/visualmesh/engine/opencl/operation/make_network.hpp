@@ -105,10 +105,11 @@ namespace engine {
                     /*************************************************
                      *                WEIGHTS + BIAS                 *
                      *************************************************/
-                    if (conv[layer_no].type == LayerType::STANDARD) {
-                        // Standard convolution
-                        // Now we have to do our layer operations
-                        for (unsigned int layer_no = 0; layer_no < conv.size(); ++layer_no) {
+
+                    // Now we have to do our layer operations
+                    for (unsigned int layer_no = 0; layer_no < conv.size(); ++layer_no) {
+                        if (conv[layer_no].type == LayerType::STANDARD) {
+                            // Standard convolution
                             const auto& weights    = conv[layer_no].weights;
                             const auto& biases     = conv[layer_no].biases;
                             const auto& activation = conv[layer_no].activation;
@@ -133,55 +134,53 @@ namespace engine {
                         }
                         else {
                             // Depthwise separable convolution
-                            // Now we have to do our layer operations
-                            for (unsigned int layer_no = 0; layer_no < conv.size(); ++layer_no) {
-                                const auto& depthwise_weights = conv[layer_no].depthwise_weights;
-                                const auto& pointwise_weights = conv[layer_no].pointwise_weights;
-                                const auto& pointwise_biases  = conv[layer_no].pointwise_biases;
-                                const auto& activation        = conv[layer_no].activation;
+                            const auto& depthwise_weights = conv[layer_no].depthwise_weights;
+                            const auto& pointwise_weights = conv[layer_no].pointwise_weights;
+                            const auto& pointwise_biases  = conv[layer_no].pointwise_biases;
+                            const auto& activation        = conv[layer_no].activation;
 
-                                // Update our output dimensions
-                                output_dimensions = pointwise_biases.size();
+                            // Update our output dimensions
+                            output_dimensions = pointwise_biases.size();
 
-                                // Perform the depthwise convolution
-                                code << "  // Perform our depthwise convolution for layer " << layer_no << std::endl;
-                                code << "  Scalar in" << (layer_no + 1) << "[" << input_dimensions << "] = {"
-                                     << std::endl;
-                                for (unsigned int i = 0; i < input_dimensions; ++i) {
-                                    code << "    ";
-                                    for (unsigned int j = 0; j < depthwise_weights[i].size(); ++j) {
-                                        code << "in" << layer_no << "[" << j << "] * " << depthwise_weights[i][j]
-                                             << " + ";
-                                    }
-                                    if (i + 1 < input_dimensions) { code << ","; }
+                            // Perform the depthwise convolution
+                            code << "  // Perform our depthwise convolution for layer " << layer_no << std::endl;
+                            code << "  Scalar in" << (layer_no + 1) << "[" << input_dimensions << "] = {"
+                                 << std::endl;
+                            for (unsigned int i = 0; i < input_dimensions; ++i) {
+                                code << "    ";
+                                for (unsigned int j = 0; j < depthwise_weights[i].size(); ++j) {
+                                    code << "in" << layer_no << "[" << j << "] * " << depthwise_weights[i][j]
+                                         << " + ";
+                                }
+                                if (i + 1 < input_dimensions) { code << ","; }
+                                code << std::endl;
+                            }
+                            code << "  };" << std::endl;
+
+                            // Now perform the pointwise convolution
+                            code << "  // Perform our pointwise convolution for layer " << layer_no << std::endl;
+                            code << "  Scalar in" << (layer_no + 1) << "[" << output_dimensions << "] = {"
+                                 << std::endl;
+                            for (unsigned int i = 0; i < output_dimensions; ++i) {
+                                code << "    ";
+                                for (unsigned int j = 0; j < input_dimensions; ++j) {
+                                    code << "in" << (layer_no + 1) << "[" << j << "] * "
+                                         << pointwise_weights[j][i] + pointwise_biases[i];
+                                    if (j + 1 < input_dimensions || i + 1 < output_dimensions) { code << ","; }
                                     code << std::endl;
                                 }
-                                code << "  };" << std::endl;
-
-                                // Now perform the pointwise convolution
-                                code << "  // Perform our pointwise convolution for layer " << layer_no << std::endl;
-                                code << "  Scalar in" << (layer_no + 1) << "[" << output_dimensions << "] = {"
-                                     << std::endl;
-                                for (unsigned int i = 0; i < output_dimensions; ++i) {
-                                    code << "    ";
-                                    for (unsigned int j = 0; j < input_dimensions; ++j) {
-                                        code << "in" << (layer_no + 1) << "[" << j << "] * "
-                                             << pointwise_weights[j][i] + pointwise_biases[i];
-                                        if (j + 1 < input_dimensions || i + 1 < output_dimensions) { code << ","; }
-                                        code << std::endl;
-                                    }
-                                }
-                                code << "  };" << std::endl;
                             }
+                            code << "  };" << std::endl;
+                        }
 
-                            /*************************************************
-                             *                  ACTIVATION.                  *
-                             *************************************************/
+                        /*************************************************
+                         *                  ACTIVATION.                  *
+                         *************************************************/
 
-                            // Apply our activation function
-                            code << "  // Apply the activation function" << std::endl;
+                        // Apply our activation function
+                        code << "  // Apply the activation function" << std::endl;
 
-                            switch (activation) {
+                        switch (conv[layer_no].activation) {
                                 case ActivationFunction::SELU: {
                                     // selu constants
                                     constexpr const Scalar lambda = 1.0507009873554804934193349852946;
@@ -242,11 +241,11 @@ namespace engine {
 
                             // Update our input size for the next loop
                             input_dimensions = output_dimensions;
-                        }
+                    }
 
-                        /*************************************************
-                         *                    OUTPUT                     *
-                         *************************************************/
+                    /*************************************************
+                     *                    OUTPUT                     *
+                     *************************************************/
                         code << "  // Save our value to the output" << std::endl;
                         for (unsigned int i = 0; i < input_dimensions; ++i) {
                             code << "  output[idx * " << input_dimensions << " + " << i << "] = in" << conv.size()
