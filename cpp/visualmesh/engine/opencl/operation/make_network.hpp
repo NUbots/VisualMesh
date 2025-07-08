@@ -144,33 +144,27 @@ namespace engine {
 
                             // Perform the depthwise convolution
                             code << "  // Perform our depthwise convolution for layer " << layer_no << std::endl;
-                            code << "  Scalar in" << (layer_no + 1) << "[" << input_dimensions << "] = {"
-                                 << std::endl;
+                            code << "  Scalar depthwise_temp[" << input_dimensions << "];" << std::endl;
                             for (unsigned int i = 0; i < input_dimensions; ++i) {
-                                code << "    ";
+                                code << "  depthwise_temp[" << i << "] = ";
                                 for (unsigned int j = 0; j < depthwise_weights[i].size(); ++j) {
-                                    code << "in" << layer_no << "[" << j << "] * " << depthwise_weights[i][j]
-                                         << " + ";
+                                    if (j > 0) code << " + ";
+                                    code << "in" << layer_no << "[" << j << "] * " << depthwise_weights[i][j];
                                 }
-                                if (i + 1 < input_dimensions) { code << ","; }
-                                code << std::endl;
+                                code << ";" << std::endl;
                             }
-                            code << "  };" << std::endl;
 
                             // Now perform the pointwise convolution
                             code << "  // Perform our pointwise convolution for layer " << layer_no << std::endl;
-                            code << "  Scalar in" << (layer_no + 1) << "[" << output_dimensions << "] = {"
-                                 << std::endl;
+                            code << "  Scalar in" << (layer_no + 1) << "[" << output_dimensions << "];" << std::endl;
                             for (unsigned int i = 0; i < output_dimensions; ++i) {
-                                code << "    ";
+                                code << "  in" << (layer_no + 1) << "[" << i << "] = ";
                                 for (unsigned int j = 0; j < input_dimensions; ++j) {
-                                    code << "in" << (layer_no + 1) << "[" << j << "] * "
-                                         << pointwise_weights[j][i] + pointwise_biases[i];
-                                    if (j + 1 < input_dimensions || i + 1 < output_dimensions) { code << ","; }
-                                    code << std::endl;
+                                    if (j > 0) code << " + ";
+                                    code << "depthwise_temp[" << j << "] * " << pointwise_weights[j][i];
                                 }
+                                code << " + " << pointwise_biases[i] << ";" << std::endl;
                             }
-                            code << "  };" << std::endl;
                         }
 
                         /*************************************************
