@@ -236,10 +236,11 @@ namespace engine {
 
                     // For each network layer
                     for (unsigned int layer_no = 0; layer_no < conv.size(); ++layer_no) {
+                        const auto& activation = conv[layer_no].activation;
+
                         if (conv[layer_no].type == LayerType::STANDARD) {
                             const auto& weights    = conv[layer_no].weights;
                             const auto& biases     = conv[layer_no].biases;
-                            const auto& activation = conv[layer_no].activation;
 
                             // Setup the shapes
                             output_dimensions = biases.size();
@@ -261,7 +262,6 @@ namespace engine {
                             const auto& depthwise_weights = conv[layer_no].depthwise_weights;
                             const auto& pointwise_weights = conv[layer_no].pointwise_weights;
                             const auto& pointwise_biases  = conv[layer_no].pointwise_biases;
-                            const auto& activation        = conv[layer_no].activation;
 
                             // Update our output dimensions
                             output_dimensions = pointwise_biases.size();
