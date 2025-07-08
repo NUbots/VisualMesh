@@ -19,6 +19,9 @@
 #define VISUALMESH_OPENCL_OPERATION_MAKE_NETWORK_HPP
 
 #include <iostream>
+#include <sstream>
+#include <iomanip>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -47,6 +50,8 @@ namespace engine {
 
                 // If our structure has no layers, return empty code
                 if (structure.empty() || structure.front().empty()) { return ""; }
+
+
 
                 // First layer has 4 inputs, so that tells us how many neighbours we have (minus ourself)
                 const unsigned int n_neighbours = (structure.front().front().weights.size() / 4) - 1;
@@ -89,8 +94,8 @@ namespace engine {
                             code << "    input[neighbourhood[idx * " << n_neighbours << " + " << i << "] * "
                                  << input_dimensions << " + " << j << "]";
 
-                            // Comma separated except for the end
-                            if (i < n_neighbours || j + 1 < input_dimensions) { code << ","; }
+                            // Comma separated except for the very last element
+                            if (!(i == n_neighbours - 1 && j == input_dimensions - 1)) { code << ","; }
                             code << std::endl;
                         }
                     }
@@ -260,34 +265,28 @@ namespace engine {
 
                             code << std::endl;
 
-                            // Update our input size for the next loop
-                            input_dimensions = output_dimensions;
+                        // Update our input size for the next layer
+                        input_dimensions = output_dimensions;
                     }
 
                     /*************************************************
                      *                    OUTPUT                     *
                      *************************************************/
-                        code << "  // Save our value to the output" << std::endl;
-                        for (unsigned int i = 0; i < input_dimensions; ++i) {
-                            code << "  output[idx * " << input_dimensions << " + " << i << "] = in" << conv.size()
-                                 << "[" << i << "];" << std::endl;
-                        }
-
-                        code << "}" << std::endl << std::endl;
-
-                        // Update our input dimensions for the next round
-                        input_dimensions = output_dimensions;
+                    code << "  // Save our value to the output" << std::endl;
+                    for (unsigned int i = 0; i < output_dimensions; ++i) {
+                        code << "  output[idx * " << output_dimensions << " + " << i << "] = in" << conv.size()
+                             << "[" << i << "];" << std::endl;
                     }
 
-                    std::string kernel_code = code.str();
+                    code << "}" << std::endl << std::endl;
 
-                    // Debug: Print generated kernel code if it contains depthwise
-                    if (has_depthwise) {
-                        std::cerr << "DEBUG: Generated OpenCL kernel code:\n" << kernel_code << std::endl;
-                    }
-
-                    return kernel_code;
+                    // Update our input dimensions for the next convolution
+                    input_dimensions = output_dimensions;
                 }
+
+                std::string kernel_code = code.str();
+                return kernel_code;
+            }
 
             }  // namespace operation
         }      // namespace opencl

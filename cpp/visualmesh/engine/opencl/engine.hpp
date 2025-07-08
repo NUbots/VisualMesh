@@ -236,8 +236,16 @@ namespace engine {
 
                 // Grab all the kernels that were generated
                 for (unsigned int i = 0; i < structure.size(); ++i) {
-                    std::string kernel       = "conv" + std::to_string(i);
-                    unsigned int output_size = structure[i].back().biases.size();
+                    std::string kernel = "conv" + std::to_string(i);
+                    unsigned int output_size;
+
+                    // Get the correct output size based on layer type
+                    const auto& last_layer = structure[i].back();
+                    if (last_layer.type == LayerType::DEPTHWISE_SEPARABLE) {
+                        output_size = last_layer.pointwise_biases.size();
+                    } else {
+                        output_size = last_layer.biases.size();
+                    }
 
                     cl::kernel k(::clCreateKernel(program, kernel.c_str(), &error), ::clReleaseKernel);
                     throw_cl_error(error, "Failed to create kernel " + kernel);
