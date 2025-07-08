@@ -147,9 +147,15 @@ namespace engine {
                             code << "  Scalar depthwise_temp[" << input_dimensions << "];" << std::endl;
                             for (unsigned int i = 0; i < input_dimensions; ++i) {
                                 code << "  depthwise_temp[" << i << "] = ";
-                                for (unsigned int j = 0; j < depthwise_weights[i].size(); ++j) {
-                                    if (j > 0) code << " + ";
-                                    code << "in" << layer_no << "[" << j << "] * " << depthwise_weights[i][j];
+                                // Safety check: ensure we don't access out-of-bounds
+                                if (i < depthwise_weights.size() && !depthwise_weights[i].empty()) {
+                                    for (unsigned int j = 0; j < depthwise_weights[i].size(); ++j) {
+                                        if (j > 0) code << " + ";
+                                        code << "in" << layer_no << "[" << j << "] * " << depthwise_weights[i][j];
+                                    }
+                                } else {
+                                    // Default to 0.0 if weights are missing
+                                    code << "0.0";
                                 }
                                 code << ";" << std::endl;
                             }
@@ -161,9 +167,20 @@ namespace engine {
                                 code << "  in" << (layer_no + 1) << "[" << i << "] = ";
                                 for (unsigned int j = 0; j < input_dimensions; ++j) {
                                     if (j > 0) code << " + ";
-                                    code << "depthwise_temp[" << j << "] * " << pointwise_weights[j][i];
+                                    // Safety check for pointwise weights bounds
+                                    if (j < pointwise_weights.size() && i < pointwise_weights[j].size()) {
+                                        code << "depthwise_temp[" << j << "] * " << pointwise_weights[j][i];
+                                    } else {
+                                        code << "0.0";
+                                    }
                                 }
-                                code << " + " << pointwise_biases[i] << ";" << std::endl;
+                                // Safety check for bias bounds
+                                if (i < pointwise_biases.size()) {
+                                    code << " + " << pointwise_biases[i];
+                                } else {
+                                    code << " + 0.0";
+                                }
+                                code << ";" << std::endl;
                             }
                         }
 
