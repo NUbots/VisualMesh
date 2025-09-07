@@ -186,6 +186,7 @@ vec2<Scalar> project(const vec3<Scalar>& ray, const Lens<Scalar>& lens) {
     return subtract(subtract(multiply(cast<Scalar>(lens.dimensions), Scalar(0.5)), screen), lens.centre);
 }
 
+// Need this
 /**
  * @brief Unprojects a pixel coordinate into a unit vector working out which lens model to use via the lens parameters.
  *

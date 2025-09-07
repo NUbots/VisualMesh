@@ -50,12 +50,12 @@ class ImageTensorBoard(tf.keras.callbacks.TensorBoard):
         if logs is not None:
             with self._train_writer.as_default():
                 for m in self._image_metrics():
-                    tf.summary.image(m.name, m.images(logs[m.name]), epoch)
+                    tf.summary.image("tensorboard here 1 {}".format(m.name), m.images(logs[m.name]), epoch)
 
             if any([l.startswith("val_") for l in logs.keys()]):
                 with self._val_writer.as_default():
                     for m in self._image_metrics():
-                        tf.summary.image(m.name, m.images(logs["val_{}".format(m.name)]), epoch)
+                        tf.summary.image("tensorboard here 2 {}".format(m.name), m.images(logs["val_{}".format(m.name)]), epoch)
 
         super(ImageTensorBoard, self).on_epoch_end(epoch, self._filter_logs(logs))
 

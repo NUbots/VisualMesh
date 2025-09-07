@@ -4,6 +4,7 @@ import argparse
 import os
 import re
 import sys
+import json
 from glob import glob
 
 import numpy as np
@@ -25,6 +26,28 @@ def bytes_feature(value):
     return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
 
+def process_targets(targets):
+    """
+    Convert seeker targets to proper format for TensorFlow FixedLenSequenceFeature.
+
+    Our data format is:
+    - No targets: 0
+    - With targets: [[x1,y1,z1], [x2,y2,z2], ...]
+
+    FixedLenSequenceFeature([3], tf.float32) expects a flat list of floats
+    that will be reshaped into (N, 3) where N is the number of targets.
+    """
+    if targets == 0:
+        # No targets detected - return empty list
+        return []
+    elif isinstance(targets, list) and len(targets) > 0:
+        # 3D positions format - flatten to list of floats
+        return np.array(targets, dtype=np.float32).flatten().tolist()
+    else:
+        # No targets or invalid format
+        return []
+
+
 def make_tfrecord(output_file, input_files):
 
     with tf.io.TFRecordWriter(output_file) as writer:
@@ -44,6 +67,9 @@ def make_tfrecord(output_file, input_files):
             with open(mask_file, "rb") as f:
                 mask = f.read()
 
+            # Process the targets properly for FixedLenSequenceFeature
+            targets_floats = process_targets(lens["seeker"]["targets"])
+
             # Create the record
             writer.write(
                 tf.train.Example(
@@ -51,6 +77,7 @@ def make_tfrecord(output_file, input_files):
                         feature={
                             "image": bytes_feature(image),
                             "mask": bytes_feature(mask),
+                            # "seeker/targets": float_list_feature(targets_floats),
                             "lens/projection": bytes_feature(lens["projection"].encode("utf-8")),
                             "lens/fov": float_feature(lens["fov"]),
                             "lens/focal_length": float_feature(lens["focal_length"]),

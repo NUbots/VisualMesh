@@ -47,7 +47,10 @@ class Seeker:
 
         # If a target isn't on screen we will be expecting the network to predict on things it can't see
         # This will result in lower performance as it tries to learn how to do this for the training dataset
-        px = tf.cast(tf.round(project(targets, dims, projection, focal_length, centre, k)), tf.int32)
+        # project() expects unit direction vectors, but `targets` are 3D positions (distance * direction)
+        # Normalise first to obtain pure viewing rays for visibility testing, then filter the original positions
+        target_dirs, _ = tf.linalg.normalize(targets, axis=-1)
+        px = tf.cast(tf.round(project(target_dirs, dims, projection, focal_length, centre, k)), tf.int32)
         on_screen = tf.reduce_all(tf.logical_and(px >= 0, px < tf.expand_dims(dims, 0)), axis=-1)
         targets = tf.gather(targets, tf.squeeze(tf.where(on_screen), axis=-1))
 

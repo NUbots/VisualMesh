@@ -186,6 +186,26 @@ class SeekerImages(tf.keras.callbacks.Callback):
         # Apply the colours
         ring_overlay = tf.clip_by_value(tf.einsum("ij,k->ijk", ring_overlay, tf.constant([1.0, 1.0, 1.0])), 0.0, 1.0)
 
+        # # Add ground truth visualization if targets are provided
+        # ground_truth_overlay = tf.zeros_like(img)
+        # if targets is not None:
+        #     # Get the original 3D unit vectors from the raw dataset
+        #     # These should be the unit vectors pointing toward balls in camera space
+        #     original_targets = tf.reshape(targets, (-1, 3))  # Reshape to handle any batch dimensions
+
+        #     # Project unit vectors directly to pixel coordinates
+        #     gt_target_px = tf.cast(tf.round(project(original_targets, dims, projection, f, centre, k)), tf.int32)
+
+        #     # Filter to on-screen ground truth targets
+        #     gt_on_screen = self._on_screen(gt_target_px, dims)
+        #     if tf.size(gt_on_screen) > 0:
+        #         gt_target_px_filtered = tf.gather(gt_target_px, gt_on_screen)
+
+        #         # Create ground truth overlay as green dots
+        #         if tf.size(gt_target_px_filtered) > 0:
+        #             gt_overlay = tf.scatter_nd(gt_target_px_filtered, tf.ones_like(gt_target_px_filtered[:, 0], dtype=tf.float32), dims)
+        #             ground_truth_overlay = tf.clip_by_value(tf.einsum("ij,k->ijk", gt_overlay, tf.constant([0.0, 1.0, 0.0])), 0.0, 1.0)
+
         output = self._blend(self._blend(img, ring_overlay), bees)
 
         return (img_hash, output)
@@ -215,4 +235,4 @@ class SeekerImages(tf.keras.callbacks.Callback):
         # Sort by hash so the images show up in the same order every time
         with self.writer.as_default():
             for i, img in enumerate(sorted(images, key=lambda image: image[0])):
-                tf.summary.image("images/{}".format(i), tf.expand_dims(img[1], axis=0), step=epoch, max_outputs=1)
+                tf.summary.image("Seeker Predictions vs Ground Truth/{}".format(i), tf.expand_dims(img[1], axis=0), step=epoch, max_outputs=1)
