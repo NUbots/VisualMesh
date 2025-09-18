@@ -43,5 +43,15 @@ def Metrics(config):
             SeekerHourglass("metrics/hourglass"),
         ]
 
+    elif config["label"]["type"] == "Anchorless":
+        # For now, return basic metrics similar to classification
+        # TODO: Add specific anchorless metrics for heatmap evaluation
+        return [
+            # Could add heatmap-specific metrics here like:
+            # - Peak detection accuracy
+            # - Gaussian overlap metrics
+            # - False positive/negative rates for heatmaps
+        ]
+
     else:
         raise RuntimeError("Cannot create metrics, {} is not a supported  type".format(config["label"]["type"]))

@@ -20,4 +20,5 @@
 # }
 
 from .classification import Classification
+from .anchorless import Anchorless
 from .seeker import Seeker

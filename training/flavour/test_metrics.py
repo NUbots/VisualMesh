@@ -149,6 +149,10 @@ def TestMetrics(config):
 
         return curves
 
+    elif config["label"]["type"] == "Anchorless":
+        # TODO: Implement anchorless-specific metrics
+        return []
+
     elif config["label"]["type"] == "Seeker":
         return [
             SeekerHourglass(name="metrics/curves/hourglass"),

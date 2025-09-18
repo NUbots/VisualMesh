@@ -24,5 +24,11 @@ def Loss(config):
     elif config["label"]["type"] == "Seeker":
         return SeekerLoss()
 
+    elif config["label"]["type"] == "Anchorless":
+        # Use alpha and beta from config, with defaults
+        alpha = config["label"]["config"].get("alpha", 2.0)
+        beta = config["label"]["config"].get("beta", 4.0)
+        return AnchorlessLoss(alpha=alpha, beta=beta)
+
     else:
         raise RuntimeError("Cannot create loss function, {} is not a supported type".format(config["label"]["type"]))

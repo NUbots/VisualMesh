@@ -13,7 +13,7 @@
 # COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
 # OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-from ..callbacks import ClassificationImages, SeekerImages
+from ..callbacks import ClassificationImages, AnchorlessImages, SeekerImages
 from .dataset import Dataset
 from .merge_configuration import merge_configuration
 
@@ -32,6 +32,20 @@ def ImageCallback(config, output_path):
             dataset=Dataset(config, "validation", batch_size=n_images).take(1),
             # Draw using the first colour in the list for each class
             colours=[c["colours"][0] for c in classes],
+        )
+
+    elif config["label"]["type"] == "Anchorless":
+
+        n_images = config["training"]["validation"]["progress_images"]
+
+        return AnchorlessImages(
+            output_path=output_path,
+            dataset=Dataset(config, "validation", batch_size=n_images).take(1),
+            model=validation_config["projection"]["config"]["mesh"]["model"],
+            max_distance=validation_config["projection"]["config"]["mesh"]["max_distance"],
+            geometry=validation_config["projection"]["config"]["geometry"]["shape"],
+            radius=validation_config["projection"]["config"]["geometry"]["radius"],
+            sigma=validation_config["label"]["config"].get("sigma", 0.1),
         )
 
     elif config["label"]["type"] == "Seeker":

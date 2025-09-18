@@ -14,7 +14,7 @@
 # OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 from .example import Image
-from .label import Classification, Seeker
+from .label import Classification, Anchorless, Seeker
 from .orientation import Ground, Spotlight
 from .projection import VisualMesh
 from .view import Monoscopic
@@ -52,6 +52,8 @@ def Dataset(paths, batch_size, view, example, orientation, label, projection, ke
     # Find the correct dataset labelling class
     if label["type"] == "Classification":
         label = Classification(**label["config"])
+    elif label["type"] == "Anchorless":
+        label = Anchorless(**label["config"])
     elif label["type"] == "Seeker":
         label = Seeker(**label["config"])
     else:

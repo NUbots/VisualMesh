@@ -14,4 +14,5 @@
 # OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 from .focal_loss import FocalLoss
+from .anchorless_loss import AnchorlessLoss
 from .seeker_loss import SeekerLoss
