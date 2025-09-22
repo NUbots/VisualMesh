@@ -13,23 +13,21 @@
 # COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
 # OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-# ...existing code...
 
 import math
 import tensorflow as tf
-from training.op import difference_visual_mesh, map_visual_mesh, unmap_visual_mesh
+from training.op import difference_visual_mesh, unmap_visual_mesh
 from training.projection import project
-
 
 class Anchorless:
     def __init__(self, sigma, mesh, geometry, **config):
         """
-        Anchorless label generator for CenterNet-style heatmap detection.
-        Uses Visual Mesh coordinate system properly.
+        CenterNet-style ground-truth label generator in Visual Mesh space.
+        Produces:
+          - Y: [num_nodes, 1] heatmap with hard 1.0 peaks at nearest node(s)
+          - center_indices: [num_targets] int vector of peak node ids
         """
         self.sigma = sigma
-
-        # Grab our relevant fields
         self.mesh_model = mesh["model"]
         self.geometry = tf.constant(geometry["shape"], dtype=tf.string, name="GeometryType")
         self.radius = geometry["radius"]
@@ -47,50 +45,68 @@ class Anchorless:
         k = features["lens/k"]
         dims = tf.shape(image)[:2]
 
-        # If no targets, return zeros
+        # No targets → pure background heatmap
         if tf.size(targets) == 0:
-            return {"Y": tf.zeros((tf.shape(V)[0], 1), dtype=tf.float32)}
+            return {
+                "Y": tf.zeros((tf.shape(V)[0], 1), dtype=tf.float32),
+                "center_indices": tf.zeros((0,), dtype=tf.int64),
+            }
 
-        # Use same filtering as Seeker (on-screen and ratio checks)
+        # Filter to on-screen targets
         target_dirs, _ = tf.linalg.normalize(targets, axis=-1)
         px = tf.cast(tf.round(project(target_dirs, dims, projection, focal_length, centre, k)), tf.int32)
         on_screen = tf.reduce_all(tf.logical_and(px >= 0, px < tf.expand_dims(dims, 0)), axis=-1)
         targets = tf.gather(targets, tf.squeeze(tf.where(on_screen), axis=-1))
 
         if tf.size(targets) == 0:
-            return {"Y": tf.zeros((tf.shape(V)[0], 1), dtype=tf.float32)}
+            return {
+                "Y": tf.zeros((tf.shape(V)[0], 1), dtype=tf.float32),
+                "center_indices": tf.zeros((0,), dtype=tf.int64),
+            }
 
-        # Transform targets to observation plane space (same as Seeker)
-        uOCo, l = tf.linalg.normalize(tf.einsum("ij,kj->ki", Hoc[:3, :3], targets), axis=-1)
+        # Transform targets into observation-plane camera space and keep only below the camera
+        uOCo, _ = tf.linalg.normalize(tf.einsum("ij,kj->ki", Hoc[:3, :3], targets), axis=-1)
         uOCo = tf.gather(uOCo, tf.squeeze(tf.where(uOCo[:, 2] < 0), axis=-1))
 
         if tf.size(uOCo) == 0:
-            return {"Y": tf.zeros((tf.shape(V)[0], 1), dtype=tf.float32)}
+            return {
+                "Y": tf.zeros((tf.shape(V)[0], 1), dtype=tf.float32),
+                "center_indices": tf.zeros((0,), dtype=tf.int64),
+            }
 
-        # Get mesh arguments
+        # Visual Mesh args
         height = Hoc[2, 3]
         args = {"model": self.mesh_model, "height": height, "geometry": self.geometry, "radius": self.radius}
 
-        # Convert to Visual Mesh coordinates (same as Seeker)
-        mesh_nm = unmap_visual_mesh(V, **args)
-        target_nm = unmap_visual_mesh(uOCo, **args)
+        # Map to nm coordinates
+        mesh_nm = unmap_visual_mesh(V, **args)          # [N_nodes, 2]
+        target_nm = unmap_visual_mesh(uOCo, **args)     # [N_tgts, 2]
 
-        # Use difference_visual_mesh to get proper distances in Visual Mesh space
         n_nodes = tf.shape(mesh_nm)[0]
         n_targets = tf.shape(target_nm)[0]
 
-        # Replicate points (same as Seeker)
-        m = tf.reshape(tf.tile(mesh_nm, (1, n_targets)), (-1, 2))
-        t = tf.tile(target_nm, (n_nodes, 1))
-
-        # Calculate differences using Visual Mesh geometry
+        # Pairwise nm differences node↔target using Visual Mesh geometry
+        m = tf.reshape(tf.tile(mesh_nm, (1, n_targets)), (-1, 2))  # [N_nodes * N_tgts, 2]
+        t = tf.tile(target_nm, (n_nodes, 1))                       # [N_nodes * N_tgts, 2]
         diff = tf.reshape(difference_visual_mesh(t, m, **args), (n_nodes, n_targets, 2))
 
-        # Calculate distances in Visual Mesh space
-        distances = tf.norm(diff, axis=-1)  # [N, M]
+        # Distances in mesh "cells"
+        d_cells = tf.norm(diff, axis=-1)                            # [N_nodes, N_tgts]
 
-        # Generate Gaussian heatmap using Visual Mesh distances
-        gaussian_values = tf.exp(-(distances ** 2) / (2 * self.sigma ** 2))
-        heatmap = tf.reduce_max(gaussian_values, axis=-1, keepdims=True)  # [N, 1]
+        # Gaussian splat per target, then max over targets
+        gauss = tf.exp(-0.5 * tf.square(d_cells / self.sigma))      # [N_nodes, N_tgts]
+        H_gt = tf.reduce_max(gauss, axis=-1)                         # [N_nodes]
 
-        return {"Y": heatmap}
+        # Hard 1.0 peaks at nearest node(s) to each target
+        nearest_idx = tf.argmin(d_cells, axis=0)                     # [N_tgts]
+        H_gt = tf.tensor_scatter_nd_update(
+            H_gt,
+            indices=tf.reshape(nearest_idx, (-1, 1)),
+            updates=tf.ones_like(nearest_idx, dtype=H_gt.dtype),
+        )
+
+        # Final shapes
+        H_gt = tf.expand_dims(H_gt, -1)                              # [N_nodes, 1]
+        center_indices = tf.cast(nearest_idx, tf.int64)              # [N_tgts]
+
+        return {"Y": H_gt, "center_indices": center_indices}
