@@ -15,4 +15,5 @@
 
 from .focal_loss import FocalLoss
 from .anchorless_loss import AnchorlessLoss
+from .centernet_loss import CenterNetLoss
 from .seeker_loss import SeekerLoss

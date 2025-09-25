@@ -77,6 +77,34 @@ class AnchorlessLoss:
 
         return total_loss
 
+class CenterNetLossLogits:
+    """
+    CenterNet focal loss (logits version).
+    Use this if your network head outputs raw logits (no sigmoid in the model).
+    """
+
+    def __init__(self, alpha=2.0, beta=4.0):
+        self.alpha = alpha
+        self.beta = beta
+
+    def __call__(self, y_true, logits):
+        # Convert logits to probs only for weighting, but use stable cross-entropy
+        p = tf.sigmoid(logits)
+
+        pos_mask = tf.cast(tf.equal(y_true, 1.0), tf.float32)
+        neg_mask = 1.0 - pos_mask
+        neg_weight = tf.pow(1.0 - y_true, self.beta)
+
+        # Positive focal loss
+        pos_loss = -tf.pow(1.0 - p, self.alpha) * tf.nn.log_sigmoid(logits) * pos_mask
+        # Negative focal loss
+        neg_loss = -tf.pow(p, self.alpha) * tf.nn.log_sigmoid(-logits) * neg_mask * neg_weight
+
+        num_objs = tf.maximum(tf.reduce_sum(pos_mask), 1.0)
+        total = (tf.reduce_sum(pos_loss) + tf.reduce_sum(neg_loss)) / num_objs
+
+        return total
+
 
 class AnchorlessLossWithOffset:
     """
