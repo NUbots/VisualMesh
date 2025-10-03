@@ -43,33 +43,37 @@ class AnchorlessLoss:
         Compute the anchorless focal loss.
 
         Args:
-            y_true: Ground truth heatmap [batch_size, num_points, 1]
-            y_pred: Predicted heatmap [batch_size, num_points, 1]
+            y_true: Ground truth [batch_size, num_points, 3] - heatmap + offsets
+            y_pred: Predicted [batch_size, num_points, 3] - heatmap + offsets
 
         Returns:
             Scalar loss value
         """
+        # Extract only the heatmap channel (first channel) for loss computation
+        y_true_hm = y_true[:, :, 0:1]  # [batch_size, num_points, 1]
+        y_pred_hm = y_pred[:, :, 0:1]  # [batch_size, num_points, 1]
+
         # Ensure predictions are in valid range [0, 1]
-        y_pred = tf.clip_by_value(y_pred, 1e-7, 1.0 - 1e-7)
+        y_pred_hm = tf.clip_by_value(y_pred_hm, 1e-7, 1.0 - 1e-7)
 
         # Separate positive and negative examples
         # Positive: where ground truth > 0 (near object centers)
         # Negative: where ground truth = 0 (background)
-        pos_mask = tf.cast(tf.greater(y_true, 0.0), tf.float32)
-        neg_mask = tf.cast(tf.equal(y_true, 0.0), tf.float32)
+        pos_mask = tf.cast(tf.greater(y_true_hm, 0.0), tf.float32)
+        neg_mask = tf.cast(tf.equal(y_true_hm, 0.0), tf.float32)
 
         # Count positive examples for normalization
         num_pos = tf.maximum(tf.reduce_sum(pos_mask), 1.0)
 
         # Focal loss for positive examples
         # When prediction is wrong (y_pred low, y_true high), loss is high
-        pos_loss = -tf.pow(1.0 - y_pred, self.alpha) * tf.math.log(y_pred) * y_true
+        pos_loss = -tf.pow(1.0 - y_pred_hm, self.alpha) * tf.math.log(y_pred_hm) * y_true_hm
         pos_loss = tf.reduce_sum(pos_loss * pos_mask)
 
         # Focal loss for negative examples
         # Reduce loss for easy negatives (y_pred already low)
         # Focus on hard negatives (y_pred high but y_true = 0)
-        neg_loss = -tf.pow(y_pred, self.alpha) * tf.pow(1.0 - y_true, self.beta) * tf.math.log(1.0 - y_pred)
+        neg_loss = -tf.pow(y_pred_hm, self.alpha) * tf.pow(1.0 - y_true_hm, self.beta) * tf.math.log(1.0 - y_pred_hm)
         neg_loss = tf.reduce_sum(neg_loss * neg_mask)
 
         # Normalize by number of positive examples
@@ -96,9 +100,9 @@ class CenterNetLossLogits:
         neg_weight = tf.pow(1.0 - y_true, self.beta)
 
         # Positive focal loss
-        pos_loss = -tf.pow(1.0 - p, self.alpha) * tf.nn.log_sigmoid(logits) * pos_mask
+        pos_loss = -tf.pow(1.0 - p, self.alpha) * tf.math.log_sigmoid(logits) * pos_mask
         # Negative focal loss
-        neg_loss = -tf.pow(p, self.alpha) * tf.nn.log_sigmoid(-logits) * neg_mask * neg_weight
+        neg_loss = -tf.pow(p, self.alpha) * tf.math.log_sigmoid(-logits) * neg_mask * neg_weight
 
         num_objs = tf.maximum(tf.reduce_sum(pos_mask), 1.0)
         total = (tf.reduce_sum(pos_loss) + tf.reduce_sum(neg_loss)) / num_objs
@@ -197,6 +201,93 @@ class AnchorlessLossWithOffset:
 
         # Combine losses
         total_loss = hm_loss + self.offset_weight * off_loss
+
+        return total_loss
+
+
+class CenterNetLogitsWithOffsetLoss:
+    def __init__(self, alpha=2.0, beta=4.0, offset_weight=1.0):
+        self.alpha = alpha
+        self.beta = beta
+        self.offset_weight = offset_weight
+
+    @staticmethod
+    def _split(y):
+        # y: [B, N, 3]
+        hm   = y[..., 0:1]  # [B,N,1]
+        offs = y[..., 1:3]  # [B,N,2]
+        return hm, offs
+
+    def heatmap_loss(self, hm_true, hm_logits):
+        # hm_true in [0,1] with hard 1.0 peaks; hm_logits are raw.
+        # Add numerical stability by clipping logits
+        hm_logits = tf.clip_by_value(hm_logits, -50.0, 50.0)
+
+        # Check for invalid inputs
+        if tf.reduce_any(tf.math.is_nan(hm_logits)) or tf.reduce_any(tf.math.is_nan(hm_true)):
+            return tf.constant(0.0, dtype=tf.float32)
+
+        p = tf.sigmoid(hm_logits)
+        pos = tf.cast(tf.equal(hm_true, 1.0), tf.float32)   # peaks only
+        neg = 1.0 - pos
+        neg_w = tf.pow(1.0 - hm_true, self.beta)
+
+        # Use stable log-sigmoid with additional clipping
+        log_sigmoid_pos = tf.clip_by_value(tf.math.log_sigmoid(hm_logits), -50.0, 0.0)
+        log_sigmoid_neg = tf.clip_by_value(tf.math.log_sigmoid(-hm_logits), -50.0, 0.0)
+
+        pos_loss = - tf.pow(1.0 - p, self.alpha) * log_sigmoid_pos * pos
+        neg_loss = - tf.pow(p, self.alpha) * log_sigmoid_neg * neg * neg_w
+
+        num_pos = tf.maximum(tf.reduce_sum(pos), 1.0)
+
+        # Add numerical stability check
+        pos_sum = tf.reduce_sum(pos_loss)
+        neg_sum = tf.reduce_sum(neg_loss)
+
+        # Check for NaN/Inf in intermediate results
+        if tf.reduce_any(tf.math.is_nan(pos_sum)) or tf.reduce_any(tf.math.is_nan(neg_sum)):
+            return tf.constant(0.0, dtype=tf.float32)
+
+        total_loss = (pos_sum + neg_sum) / num_pos
+
+        # Final safety check
+        return tf.where(tf.math.is_finite(total_loss), total_loss, 0.0)
+
+    def offset_loss(self, hm_true, off_true, off_pred):
+        # supervise offsets only at center nodes (hm_true == 1.0)
+        pos = tf.cast(tf.equal(hm_true, 1.0), tf.float32)         # [B,N,1]
+        # Huber / Smooth-L1
+        diff  = off_pred - off_true                               # [B,N,2]
+        abs_d = tf.abs(diff)
+        huber = tf.where(abs_d < 1.0, 0.5*tf.square(diff), abs_d - 0.5)
+        huber = tf.reduce_sum(huber, axis=-1, keepdims=True)      # [B,N,1]
+
+        num_pos = tf.maximum(tf.reduce_sum(pos), 1.0)
+        return tf.reduce_sum(huber * pos) / num_pos
+
+    def __call__(self, y_true, y_pred):
+        hm_t, off_t = self._split(y_true)   # [B,N,1], [B,N,2]
+        hm_p, off_p = self._split(y_pred)   # logits for hm, linear for offs
+
+        # Debug: check for NaN/Inf in inputs
+        if tf.reduce_any(tf.math.is_nan(y_true)) or tf.reduce_any(tf.math.is_nan(y_pred)):
+            tf.print("NaN detected in inputs!")
+            return tf.constant(0.0, dtype=tf.float32)
+
+        if tf.reduce_any(tf.math.is_inf(y_true)) or tf.reduce_any(tf.math.is_inf(y_pred)):
+            tf.print("Inf detected in inputs!")
+            return tf.constant(0.0, dtype=tf.float32)
+
+        hm = self.heatmap_loss(hm_t, hm_p)
+        of = self.offset_loss (hm_t, off_t, off_p)
+
+        total_loss = hm + self.offset_weight * of
+
+        # Final check
+        if tf.math.is_nan(total_loss) or tf.math.is_inf(total_loss):
+            tf.print("Final loss is NaN/Inf, returning 0")
+            return tf.constant(0.0, dtype=tf.float32)
 
         return total_loss
 
