@@ -15,8 +15,22 @@
 
 import tensorflow as tf
 
-from .confusion import Confusion
-from .confusion_curve import ConfusionCurve
-from .curve import Curve
-from .seeker_hourglass import SeekerHourglass
-from .anchorless_pr_curve import AnchorlessPRCurve
+from .anchorless_confusion_base import AnchorlessConfusionBase
+
+
+class AnchorlessPrecision(AnchorlessConfusionBase):
+    def __init__(self, name, threshold, use_offsets=True, **kwargs):
+        super(AnchorlessPrecision, self).__init__(name, threshold, use_offsets, **kwargs)
+
+    def result(self):
+        # True positives (predicted and labelled true)
+        tp = tf.cast(self.confusion[1, 1], self.dtype)
+        # For all labels where positive was predicted (all positives)
+        p = tf.cast(tf.reduce_sum(self.confusion[:, 1]), self.dtype)
+
+        # Return 0 if no predictions were made, otherwise compute precision
+        return tf.cond(
+            tf.greater(p, 0),
+            lambda: tp / p,
+            lambda: tf.constant(0.0, dtype=self.dtype)
+        )

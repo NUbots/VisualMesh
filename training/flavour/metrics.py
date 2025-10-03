@@ -44,13 +44,19 @@ def Metrics(config):
         ]
 
     elif config["label"]["type"] == "Anchorless":
-        # For now, return basic metrics similar to classification
-        # TODO: Add specific anchorless metrics for heatmap evaluation
+        # Anchorless detection metrics based on heatmap peak detection
+        use_offsets = config["label"]["config"].get("use_offsets", True)
         return [
-            # Could add heatmap-specific metrics here like:
-            # - Peak detection accuracy
-            # - Gaussian overlap metrics
-            # - False positive/negative rates for heatmaps
+            AnchorlessPrecision("metrics/precision95", 0.95, use_offsets),
+            AnchorlessRecall("metrics/recall95", 0.95, use_offsets),
+            AnchorlessPrecision("metrics/precision75", 0.75, use_offsets),
+            AnchorlessRecall("metrics/recall75", 0.75, use_offsets),
+            AnchorlessPrecision("metrics/precision50", 0.50, use_offsets),
+            AnchorlessRecall("metrics/recall50", 0.50, use_offsets),
+            AnchorlessPrecision("metrics/precision25", 0.25, use_offsets),
+            AnchorlessRecall("metrics/recall25", 0.25, use_offsets),
+            AnchorlessPrecision("metrics/precision10", 0.10, use_offsets),
+            AnchorlessRecall("metrics/recall10", 0.10, use_offsets),
         ]
 
     else:

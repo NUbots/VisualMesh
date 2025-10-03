@@ -28,7 +28,8 @@ def Loss(config):
         # Use alpha and beta from config, with defaults
         alpha = config["label"]["config"].get("alpha", 2.0)
         beta = config["label"]["config"].get("beta", 4.0)
-        return CenterNetLoss(alpha=alpha, beta=beta)
+        offset_weight = config["label"]["config"].get("offset_weight", 1.0)
+        return CenterNetLogitsWithOffsetLoss(alpha=alpha, beta=beta, offset_weight=offset_weight)
 
     else:
         raise RuntimeError("Cannot create loss function, {} is not a supported type".format(config["label"]["type"]))

@@ -20,3 +20,6 @@ from .class_recall import ClassRecall
 from .seeker_precision import SeekerPrecision
 from .seeker_recall import SeekerRecall
 from .seeker_stddev import SeekerStdDev
+from .anchorless_precision import AnchorlessPrecision
+from .anchorless_recall import AnchorlessRecall
+from .anchorless_debug import AnchorlessDebug

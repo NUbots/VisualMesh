@@ -20,15 +20,16 @@ from training.op import difference_visual_mesh, unmap_visual_mesh
 from training.projection import project
 
 class Anchorless:
-    def __init__(self, sigma, mesh, geometry, offset_scale=1.0, **config):
+    def __init__(self, sigma, mesh, geometry, offset_scale=1.0, use_offsets=True, **config):
         """
         CenterNet-style ground-truth label generator in Visual Mesh space.
         Produces:
-          - Y: [num_nodes, 1] heatmap with hard 1.0 peaks at nearest node(s)
+          - Y: [num_nodes, 3] with [heatmap, offset_x, offset_y] channels
           - center_indices: [num_targets] int vector of peak node ids
         """
         self.sigma = sigma
         self.offset_scale = offset_scale
+        self.use_offsets = use_offsets
         self.mesh_model = mesh["model"]
         self.geometry = tf.constant(geometry["shape"], dtype=tf.string, name="GeometryType")
         self.radius = geometry["radius"]
@@ -110,20 +111,25 @@ class Anchorless:
         # Final shapes
         H_gt = tf.expand_dims(H_gt, -1)                              # [N_nodes, 1]
 
-        # Offsets: only at center nodes
-        center_nm  = tf.gather(mesh_nm, nearest_idx)             # [T,2]
-        off_centers = difference_visual_mesh(target_nm, center_nm, **args)  # [T,2]
-        off_centers = off_centers / self.offset_scale            # optional scaling to ~[-1,1]
+        if self.use_offsets:
+            # Offsets: only at center nodes
+            center_nm  = tf.gather(mesh_nm, nearest_idx)             # [T,2]
+            off_centers = difference_visual_mesh(target_nm, center_nm, **args)  # [T,2]
+            off_centers = off_centers / self.offset_scale            # optional scaling to ~[-1,1]
 
-        # Scatter into a node-wise offset map (zeros elsewhere).
-        # If multiple targets share a node, average their offsets.
-        idx = tf.cast(nearest_idx, tf.int32)
-        sums = tf.math.unsorted_segment_sum(off_centers, idx, n_nodes)                 # [N,2]
-        counts = tf.math.unsorted_segment_sum(tf.ones_like(off_centers[:, :1]), idx, n_nodes)  # [N,1]
-        offsets = tf.math.divide_no_nan(sums, counts)                            # [N,2]
+            # Scatter into a node-wise offset map (zeros elsewhere).
+            # If multiple targets share a node, average their offsets.
+            idx = tf.cast(nearest_idx, tf.int32)
+            sums = tf.math.unsorted_segment_sum(off_centers, idx, n_nodes)                 # [N,2]
+            counts = tf.math.unsorted_segment_sum(tf.ones_like(off_centers[:, :1]), idx, n_nodes)  # [N,1]
+            offsets = tf.math.divide_no_nan(sums, counts)                            # [N,2]
 
-        # Pack into single Y: [N, 3]  (channel 0=heatmap, 1:3=offsets)
-        Y = tf.concat([H_gt, offsets], axis=-1)
+            # Pack into single Y: [N, 3]  (channel 0=heatmap, 1:3=offsets)
+            Y = tf.concat([H_gt, offsets], axis=-1)
+        else:
+            # No offsets: just heatmap with zero padding
+            zeros = tf.zeros((n_nodes, 2), dtype=H_gt.dtype)
+            Y = tf.concat([H_gt, zeros], axis=-1)  # [N, 3]
         return {
             "Y": Y,
             "center_indices": nearest_idx,

@@ -15,8 +15,22 @@
 
 import tensorflow as tf
 
-from .confusion import Confusion
-from .confusion_curve import ConfusionCurve
-from .curve import Curve
-from .seeker_hourglass import SeekerHourglass
-from .anchorless_pr_curve import AnchorlessPRCurve
+from .anchorless_confusion_base import AnchorlessConfusionBase
+
+
+class AnchorlessRecall(AnchorlessConfusionBase):
+    def __init__(self, name, threshold, use_offsets=True, **kwargs):
+        super(AnchorlessRecall, self).__init__(name, threshold, use_offsets, **kwargs)
+
+    def result(self):
+        # True positives (predicted and labelled true)
+        tp = tf.cast(self.confusion[1, 1], self.dtype)
+        # For all real positives (ground truth positives)
+        real_p = tf.cast(tf.reduce_sum(self.confusion[1, :]), self.dtype)
+
+        # Return 0 if no ground truth positives, otherwise compute recall
+        return tf.cond(
+            tf.greater(real_p, 0),
+            lambda: tp / real_p,
+            lambda: tf.constant(0.0, dtype=self.dtype)
+        )

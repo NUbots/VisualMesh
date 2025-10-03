@@ -1,4 +1,3 @@
-# ...existing code...
 
 import hashlib
 import math
@@ -11,9 +10,10 @@ from training.projection import project
 
 
 class AnchorlessImages(tf.keras.callbacks.Callback):
-    def __init__(self, output_path, dataset, model, max_distance, geometry, radius, sigma, offset_scale=1.0):
+    def __init__(self, output_path, dataset, model, max_distance, geometry, radius, sigma, offset_scale=1.0, use_offsets=True):
         super(AnchorlessImages, self).__init__()
         self.offset_scale = float(offset_scale)
+        self.use_offsets = use_offsets
 
         self.max_distance = max_distance
         self.radius = radius
@@ -227,11 +227,14 @@ class AnchorlessImages(tf.keras.callbacks.Callback):
         true_where = tf.where(hm_true_flat >= 1.0)  # [K,1]
         true_idx = tf.cast(tf.reshape(true_where, [-1]), tf.int32)  # [K]
 
-        # 2) Compute GT center pixels (node + scaled offset)
+        # 2) Compute GT center pixels (node + optional offset)
         if tf.size(true_idx) > 0:
-            off_gt = tf.gather(off_true, true_idx)   # [K,2]
             nm_gt  = tf.gather(nm, true_idx)         # [K,2]
-            center_nm_true = nm_gt + off_gt * self.offset_scale
+            if self.use_offsets:
+                off_gt = tf.gather(off_true, true_idx)   # [K,2]
+                center_nm_true = nm_gt + off_gt * self.offset_scale
+            else:
+                center_nm_true = nm_gt  # Just use the node position
             true_px = self._nm_to_px(center_nm_true, Hoc, lens, dims)  # np.int32 [K,2]
         else:
             true_px = np.zeros((0, 2), dtype=np.int32)
@@ -244,9 +247,12 @@ class AnchorlessImages(tf.keras.callbacks.Callback):
         topk = tf.math.top_k(hm_pred_flat, k=K, sorted=True)
         pred_idx = tf.cast(topk.indices, tf.int32)  # [K]
 
-        off_pr = tf.gather(off_pred, pred_idx)  # [K,2]
         nm_pr  = tf.gather(nm, pred_idx)        # [K,2]
-        center_nm_pred = nm_pr + off_pr * self.offset_scale
+        if self.use_offsets:
+            off_pr = tf.gather(off_pred, pred_idx)  # [K,2]
+            center_nm_pred = nm_pr + off_pr * self.offset_scale
+        else:
+            center_nm_pred = nm_pr  # Just use the node position
         pred_px = self._nm_to_px(center_nm_pred, Hoc, lens, dims)
 
         # 4) Draw

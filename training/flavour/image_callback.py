@@ -46,6 +46,7 @@ def ImageCallback(config, output_path):
             geometry=validation_config["projection"]["config"]["geometry"]["shape"],
             radius=validation_config["projection"]["config"]["geometry"]["radius"],
             sigma=validation_config["label"]["config"].get("sigma", 0.1),
+            use_offsets=validation_config["label"]["config"].get("use_offsets", True),
         )
 
     elif config["label"]["type"] == "Seeker":

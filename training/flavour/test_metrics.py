@@ -15,7 +15,7 @@
 
 from training.metrics.test.seeker_hourglass import SeekerHourglass
 import training.metrics.test.confusion_curve as confusion
-from training.metrics.test import Confusion, ConfusionCurve
+from training.metrics.test import Confusion, ConfusionCurve, AnchorlessPRCurve
 
 
 def TestMetrics(config):
@@ -150,8 +150,11 @@ def TestMetrics(config):
         return curves
 
     elif config["label"]["type"] == "Anchorless":
-        # TODO: Implement anchorless-specific metrics
-        return []
+        # Anchorless precision-recall curve for test evaluation
+        use_offsets = config["label"]["config"].get("use_offsets", True)
+        return [
+            AnchorlessPRCurve(name="metrics/curves/precision_recall", use_offsets=use_offsets),
+        ]
 
     elif config["label"]["type"] == "Seeker":
         return [
