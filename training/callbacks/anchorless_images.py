@@ -66,18 +66,32 @@ class AnchorlessImages(tf.keras.callbacks.Callback):
         if tf.size(px_filtered) == 0:
             return tf.zeros((*dims, 3), dtype=tf.float32)
 
+        # Only show predictions above threshold to avoid overwhelming ground truth
+        pred_threshold = 0.05  # Only show predictions with >5% confidence
+        pred_mask = pred_filtered > pred_threshold
+        pred_filtered_thresholded = tf.where(pred_mask, pred_filtered, 0.0)
+
         # Amplify heatmap values for better visibility
-        pred_amplified = tf.clip_by_value(pred_filtered * 3.0, 0.0, 1.0)
+        pred_amplified = tf.clip_by_value(pred_filtered_thresholded * 3.0, 0.0, 1.0)
         true_amplified = tf.clip_by_value(true_filtered * 3.0, 0.0, 1.0)
 
-        # Create 3x3 dot positions for each point
+        # Only visualize points where there's significant prediction or ground truth
+        significant_points_mask = tf.logical_or(pred_amplified > 0.01, true_amplified > 0.01)
+        px_significant = tf.gather(px_filtered, tf.squeeze(tf.where(significant_points_mask), axis=1))
+        pred_significant = tf.gather(pred_amplified, tf.squeeze(tf.where(significant_points_mask), axis=1))
+        true_significant = tf.gather(true_amplified, tf.squeeze(tf.where(significant_points_mask), axis=1))
+
+        if tf.size(px_significant) == 0:
+            return tf.zeros((*dims, 3), dtype=tf.float32)
+
+        # Create 3x3 dot positions for significant points only
         dot_size = 3
         offset_range = tf.range(-(dot_size//2), dot_size//2 + 1)
         dx, dy = tf.meshgrid(offset_range, offset_range)
         offsets = tf.stack([tf.reshape(dy, [-1]), tf.reshape(dx, [-1])], axis=1)  # [9, 2]
 
         # Expand points to 3x3 squares
-        px_expanded = tf.expand_dims(px_filtered, 1) + tf.expand_dims(offsets, 0)  # [N, 9, 2]
+        px_expanded = tf.expand_dims(px_significant, 1) + tf.expand_dims(offsets, 0)  # [N, 9, 2]
         px_expanded = tf.reshape(px_expanded, [-1, 2])  # [N*9, 2]
 
         # Filter out points that go outside image bounds
@@ -85,8 +99,8 @@ class AnchorlessImages(tf.keras.callbacks.Callback):
         px_valid = tf.gather(px_expanded, tf.squeeze(tf.where(valid_mask), axis=1))
 
         # Replicate values for each 3x3 position
-        pred_expanded = tf.repeat(pred_amplified, dot_size * dot_size)
-        true_expanded = tf.repeat(true_amplified, dot_size * dot_size)
+        pred_expanded = tf.repeat(pred_significant, dot_size * dot_size)
+        true_expanded = tf.repeat(true_significant, dot_size * dot_size)
         pred_valid = tf.gather(pred_expanded, tf.squeeze(tf.where(valid_mask), axis=1))
         true_valid = tf.gather(true_expanded, tf.squeeze(tf.where(valid_mask), axis=1))
 
