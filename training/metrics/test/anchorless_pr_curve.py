@@ -18,9 +18,42 @@ import tensorflow as tf
 from .curve import Curve
 
 
+def _precision(X, c):
+    """Calculate precision from confusion counts."""
+    thresholded = tf.cumsum(c, reverse=True, axis=0)
+    tp = thresholded[:, 0]  # True positives
+    fp = thresholded[:, 1]  # False positives
+    return tf.math.divide_no_nan(tf.cast(tp, tf.float64), tf.cast(tp + fp, tf.float64))
+
+
+def _recall(X, c):
+    """Calculate recall from confusion counts."""
+    thresholded = tf.cumsum(c, reverse=True, axis=0)
+    total_positives = tf.reduce_sum(c[:, 0])
+    tp = thresholded[:, 0]  # True positives
+    return tf.math.divide_no_nan(tf.cast(tp, tf.float64), tf.cast(total_positives, tf.float64))
+
+
+def _threshold(X, c):
+    """Return the threshold values."""
+    return tf.cast(tf.squeeze(X, axis=-1), tf.float64)
+
+
 class AnchorlessPRCurve(Curve):
-    def __init__(self, use_offsets=True, **kwargs):
-        super(AnchorlessPRCurve, self).__init__(**kwargs)
+    def __init__(self, name, use_offsets=True, **kwargs):
+        super(AnchorlessPRCurve, self).__init__(
+            name=name,
+            x_axis=_recall,           # X-axis: Recall
+            y_axis=_precision,        # Y-axis: Precision
+            sort_axis=_threshold,     # Sort by threshold
+            chart={
+                "title": "Precision-Recall Curve (Anchorless)",
+                "x_label": "Recall",
+                "y_label": "Precision",
+                "sort_label": "Threshold"
+            },
+            **kwargs
+        )
         self.use_offsets = use_offsets
 
     def update_state(self, y_true, y_pred, sample_weight=None):
