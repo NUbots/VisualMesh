@@ -110,26 +110,28 @@ class Anchorless:
                     H_gt = tf.expand_dims(H_gt, -1)                              # [N_nodes, 1]
 
                     if self.use_offsets:
-                        # Offsets: only at center nodes
-                        center_nm  = tf.gather(mesh_nm, nearest_idx)             # [T,2]
-                        off_centers = difference_visual_mesh(target_nm, center_nm, **args)  # [T,2]
-                        off_centers = off_centers / self.offset_scale            # optional scaling to ~[-1,1]
+                        # Offsets: only at the single peak node per target
+                        # nearest_idx: [T] (node id for each target)
+                        center_nm   = tf.gather(mesh_nm, nearest_idx)                         # [T,2]
+                        off_centers = difference_visual_mesh(target_nm, center_nm, **args)    # [T,2]
+                        off_centers = off_centers / self.offset_scale                         # [T,2]
 
-                        # Scatter into a node-wise offset map (zeros elsewhere).
-                        # If multiple targets share a node, average their offsets.
-                        idx = tf.cast(nearest_idx, tf.int32)
-                        sums = tf.math.unsorted_segment_sum(off_centers, idx, n_nodes)                 # [N,2]
-                        counts = tf.math.unsorted_segment_sum(tf.ones_like(off_centers[:, :1]), idx, n_nodes)  # [N,1]
-                        offsets = tf.math.divide_no_nan(sums, counts)                            # [N,2]
+                        # Scatter the per-target offsets straight into a dense [N,2] map.
+                        # Any rare duplicate node ids will be "last write wins".
+                        offsets = tf.tensor_scatter_nd_update(
+                            tf.zeros((n_nodes, 2), dtype=H_gt.dtype),
+                            tf.expand_dims(tf.cast(nearest_idx, tf.int32), axis=1),  # indices: [[j0],[j1],...]
+                            off_centers,
+                        )  # [N_nodes, 2]
 
-                        # Pack into single Y: [N, 3]  (channel 0=heatmap, 1:3=offsets)
-                        Y = tf.concat([H_gt, offsets], axis=-1)
+                        # Pack labels
+                        Y = tf.concat([H_gt, offsets], axis=-1)                    # [N_nodes, 3]
+
                     else:
-                        # No offsets: just heatmap with zero padding
                         zeros = tf.zeros((n_nodes, 2), dtype=H_gt.dtype)
-                        Y = tf.concat([H_gt, zeros], axis=-1)  # [N, 3]
+                        Y = tf.concat([H_gt, zeros], axis=-1)
 
-                    center_indices = nearest_idx
+                    center_indices = tf.cast(nearest_idx, tf.int64)
 
         return {
             "Y": Y,
