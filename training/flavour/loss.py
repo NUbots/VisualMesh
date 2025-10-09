@@ -29,7 +29,8 @@ def Loss(config):
         alpha = config["label"]["config"].get("alpha", 2.0)
         beta = config["label"]["config"].get("beta", 4.0)
         offset_weight = config["label"]["config"].get("offset_weight", 1.0)
-        return CenterNetLogitsWithOffsetLoss(alpha=alpha, beta=beta, offset_weight=offset_weight)
+        use_offsets = config["label"]["config"].get("use_offsets", True)
+        return CenterNetLogitsWithOffsetLoss(alpha=alpha, beta=beta, offset_weight=offset_weight, use_offsets=use_offsets)
 
     else:
         raise RuntimeError("Cannot create loss function, {} is not a supported type".format(config["label"]["type"]))

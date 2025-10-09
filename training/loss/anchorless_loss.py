@@ -206,10 +206,11 @@ class AnchorlessLossWithOffset:
 
 
 class CenterNetLogitsWithOffsetLoss:
-    def __init__(self, alpha=2.0, beta=4.0, offset_weight=1.0):
+    def __init__(self, alpha=2.0, beta=4.0, offset_weight=1.0, use_offsets=True):
         self.alpha = alpha
         self.beta = beta
         self.offset_weight = offset_weight
+        self.use_offsets = use_offsets
 
     @staticmethod
     def _split(y):
@@ -279,10 +280,15 @@ class CenterNetLogitsWithOffsetLoss:
             tf.print("Inf detected in inputs!")
             return tf.constant(0.0, dtype=tf.float32)
 
+        # Always compute heatmap loss
         hm = self.heatmap_loss(hm_t, hm_p)
-        of = self.offset_loss (hm_t, off_t, off_p)
 
-        total_loss = hm + self.offset_weight * of
+        # Only compute offset loss if use_offsets is enabled
+        if self.use_offsets:
+            of = self.offset_loss(hm_t, off_t, off_p)
+            total_loss = hm + self.offset_weight * of
+        else:
+            total_loss = hm
 
         # Final check
         if tf.math.is_nan(total_loss) or tf.math.is_inf(total_loss):
