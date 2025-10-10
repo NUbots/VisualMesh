@@ -258,10 +258,11 @@ class CenterNetLogitsWithOffsetLoss:
     def offset_loss(self, hm_true, off_true, off_pred):
         # supervise offsets only at center nodes (hm_true == 1.0)
         pos = tf.cast(tf.equal(hm_true, 1.0), tf.float32)         # [B,N,1]
-        # Huber / Smooth-L1
+        # Huber / Smooth-L1 (smaller delta for bounded tanh outputs)
         diff  = off_pred - off_true                               # [B,N,2]
         abs_d = tf.abs(diff)
-        huber = tf.where(abs_d < 1.0, 0.5*tf.square(diff), abs_d - 0.5)
+        delta = 0.5  # Smaller delta since targets/predictions are in [-1, 1]
+        huber = tf.where(abs_d < delta, 0.5*tf.square(diff), delta*abs_d - 0.5*delta*delta)
         huber = tf.reduce_sum(huber, axis=-1, keepdims=True)      # [B,N,1]
 
         num_pos = tf.maximum(tf.reduce_sum(pos), 1.0)
@@ -269,7 +270,7 @@ class CenterNetLogitsWithOffsetLoss:
 
     def __call__(self, y_true, y_pred):
         hm_t, off_t = self._split(y_true)   # [B,N,1], [B,N,2]
-        hm_p, off_p = self._split(y_pred)   # logits for hm, linear for offs
+        hm_p_raw, off_p_raw = self._split(y_pred)   # raw outputs for both
 
         # Debug: check for NaN/Inf in inputs
         if tf.reduce_any(tf.math.is_nan(y_true)) or tf.reduce_any(tf.math.is_nan(y_pred)):
@@ -279,6 +280,13 @@ class CenterNetLogitsWithOffsetLoss:
         if tf.reduce_any(tf.math.is_inf(y_true)) or tf.reduce_any(tf.math.is_inf(y_pred)):
             tf.print("Inf detected in inputs!")
             return tf.constant(0.0, dtype=tf.float32)
+
+        # Apply appropriate activations:
+        # Heatmap: keep as logits for stable loss computation
+        hm_p = hm_p_raw  # Keep logits for heatmap loss
+        
+        # Offsets: apply tanh to bound to [-1, 1]  
+        off_p = tf.nn.tanh(off_p_raw)  # Apply tanh activation to offset predictions
 
         # Always compute heatmap loss
         hm = self.heatmap_loss(hm_t, hm_p)

@@ -7,6 +7,7 @@ import numpy as np
 import tensorflow as tf
 from training.op import map_visual_mesh, unmap_visual_mesh
 from training.projection import project
+from training.dataset.label.anchorless import Anchorless
 
 
 class AnchorlessImages(tf.keras.callbacks.Callback):
@@ -28,6 +29,10 @@ class AnchorlessImages(tf.keras.callbacks.Callback):
         self.X = data["X"]
         self.Y = data["Y"]
         self.G = data["G"]
+        self.V = data["V"]  # Store mesh vertices for per-node scale computation
+        # Generate valid mask - for visualization callback, assume all nodes are valid
+        # In the actual training pipeline, invalid nodes are filtered out earlier
+        self.valid = tf.ones(tf.shape(self.V)[0], dtype=tf.bool)
         self.Hoc = tf.reshape(data["Hoc"], (-1, 4, 4))
         self.img = tf.reshape(data["jpg"], (-1,))
         self.lens = {
@@ -204,7 +209,31 @@ class AnchorlessImages(tf.keras.callbacks.Callback):
 
         return ring_overlay
 
-    def _detect_and_draw_centers(self, hm_true, off_true, hm_pred_prob, off_pred, nm, Hoc, lens, dims, output_img):
+    def _detect_and_draw_centers(self, hm_true, off_true, hm_pred_prob, off_pred, nm, Hoc, lens, dims, output_img, valid):
+        # For visualization, we need to handle cases where the graph structure might not match
+        # the current nm tensor. Use a safe approach that falls back to simple scaling if needed.
+        try:
+            # Check if graph indices are compatible with current mesh size
+            n_nodes = tf.shape(nm)[0]
+            max_graph_idx = tf.reduce_max(self.G)
+            
+            def safe_scaling():
+                return Anchorless.compute_per_node_scales(nm, valid, self.G)
+            
+            def fallback_scaling():
+                # Use simple constant scaling when graph doesn't match
+                return tf.ones_like(nm[:, 0]) * self.offset_scale
+            
+            # Use safe scaling if indices are valid, fallback otherwise
+            per_node_scales = tf.cond(
+                max_graph_idx < n_nodes,
+                safe_scaling,
+                fallback_scaling
+            )
+        except:
+            # If any error occurs, fall back to simple scaling
+            per_node_scales = tf.ones_like(nm[:, 0]) * self.offset_scale
+        
         # Flatten
         hm_true_flat = tf.reshape(hm_true, [-1])     # [N]
         hm_pred_flat = tf.reshape(hm_pred_prob, [-1])# [N]
@@ -218,7 +247,10 @@ class AnchorlessImages(tf.keras.callbacks.Callback):
             nm_gt  = tf.gather(nm, true_idx)         # [K,2]
             if self.use_offsets:
                 off_gt = tf.gather(off_true, true_idx)   # [K,2]
-                center_nm_true = nm_gt + off_gt * self.offset_scale
+                # Use per-node scales for proper denormalization
+                local_scales_gt = tf.gather(per_node_scales, true_idx)  # [K]
+                local_scales_gt_2d = tf.expand_dims(local_scales_gt, -1)  # [K,1] for broadcasting
+                center_nm_true = nm_gt + off_gt * local_scales_gt_2d * self.offset_scale
             else:
                 center_nm_true = nm_gt  # Just use the node position
             true_px = self._nm_to_px(center_nm_true, Hoc, lens, dims)  # np.int32 [K,2]
@@ -236,7 +268,10 @@ class AnchorlessImages(tf.keras.callbacks.Callback):
         nm_pr  = tf.gather(nm, pred_idx)        # [K,2]
         if self.use_offsets:
             off_pr = tf.gather(off_pred, pred_idx)  # [K,2]
-            center_nm_pred = nm_pr + off_pr * self.offset_scale
+            # Use per-node scales for proper denormalization  
+            local_scales_pr = tf.gather(per_node_scales, pred_idx)  # [K]
+            local_scales_pr_2d = tf.expand_dims(local_scales_pr, -1)  # [K,1] for broadcasting
+            center_nm_pred = nm_pr + off_pr * local_scales_pr_2d * self.offset_scale
         else:
             center_nm_pred = nm_pr  # Just use the node position
         pred_px = self._nm_to_px(center_nm_pred, Hoc, lens, dims)
@@ -248,7 +283,7 @@ class AnchorlessImages(tf.keras.callbacks.Callback):
         return tf.convert_to_tensor(output_np / 255.0, dtype=tf.float32)
 
 
-    def image(self, img, heatmap_pred, heatmap_true, Hoc, lens, nm):
+    def image(self, img, heatmap_pred, heatmap_true, Hoc, lens, nm, valid):
         """Generate visualization image with GT (white) and Pred (black) centers overlaid."""
         # Image preprocessing
         img_hash = hashlib.md5()
@@ -278,7 +313,7 @@ class AnchorlessImages(tf.keras.callbacks.Callback):
         output = self._blend(self._blend(img, ring_overlay), heatmap_overlay)
 
         # Detect and draw center points
-        output = self._detect_and_draw_centers(hm_true, off_true, hm_pred_prob, off_pred, nm, Hoc, lens, dims, output)
+        output = self._detect_and_draw_centers(hm_true, off_true, hm_pred_prob, off_pred, nm, Hoc, lens, dims, output, valid)
 
         return (img_hash, output)
 
@@ -314,6 +349,7 @@ class AnchorlessImages(tf.keras.callbacks.Callback):
                     Hoc=self.Hoc[i],
                     lens={k: v[i] for k, v in self.lens.items()},
                     nm=self.nm[r[0] : r[1]],
+                    valid=self.valid[r[0] : r[1]],
                 )
             )
 

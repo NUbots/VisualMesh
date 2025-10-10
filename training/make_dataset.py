@@ -52,7 +52,7 @@ def make_tfrecord(output_file, input_files):
 
     with tf.io.TFRecordWriter(output_file) as writer:
 
-        for mask_as_image_file, mask_file, lens_file in tqdm(
+        for image_file, mask_file, lens_file in tqdm(
             input_files,
             desc="Creating {}".format(os.path.basename(output_file)),
             leave=True,
@@ -62,10 +62,10 @@ def make_tfrecord(output_file, input_files):
 
             with open(lens_file, "r") as f:
                 lens = yaml.safe_load(f)
-            with open(mask_as_image_file, "rb") as f:
-                image = f.read()  # This is actually mask data being used as image
+            with open(image_file, "rb") as f:
+                image = f.read()
             with open(mask_file, "rb") as f:
-                mask = f.read()   # Same mask data for compatibility
+                mask = f.read()
 
             # Process the targets properly for FixedLenSequenceFeature
             targets_floats = process_targets(lens["seeker"]["targets"])
@@ -100,21 +100,23 @@ if __name__ == "__main__":
     input_path = args.input_path
     output_path = args.output_path
 
-    # Use mask files as the input images for simplified dataset
+    image_files = glob(os.path.join(input_path, "image*.jpg"))
     mask_files = glob(os.path.join(input_path, "mask*.png"))
     lens_files = glob(os.path.join(input_path, "lens*.yaml"))
 
     # Extract which numbers are in each of the folders
+    image_re = re.compile(r"image([^.]+)\.jpg$")
     mask_re = re.compile(r"mask([^.]+)\.png$")
     lens_re = re.compile(r"lens([^.]+)\.yaml$")
+    image_nums = set([image_re.search(os.path.basename(f)).group(1) for f in image_files])
     mask_nums = set([mask_re.search(os.path.basename(f)).group(1) for f in mask_files])
     lens_nums = set([lens_re.search(os.path.basename(f)).group(1) for f in lens_files])
-    common_nums = mask_nums & lens_nums
+    common_nums = image_nums & mask_nums & lens_nums
 
     files = [
         (
-            os.path.join(input_path, "mask{}.png".format(n)),  # Use mask as image
-            os.path.join(input_path, "mask{}.png".format(n)),  # Keep mask reference
+            os.path.join(input_path, "image{}.jpg".format(n)),
+            os.path.join(input_path, "mask{}.png".format(n)),
             os.path.join(input_path, "lens{}.yaml".format(n)),
         )
         for n in common_nums
