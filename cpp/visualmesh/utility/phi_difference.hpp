@@ -47,7 +47,7 @@ namespace util {
      * @brief Calculates the components needed to find the difference between two points in terms of number of objects.
      *
      * @details
-     *  This function takes two unit vectors and a heigh above the observation plane for the camera and calculates the
+     *  This function takes two unit vectors and a height above the observation plane for the camera and calculates the
      *  observation plane that is perpendicular to the two objects. This plane has a new height h' and two new phi
      * angles which give a 2d representation of the objects. These values can be used to calculate the n difference
      * between them.
