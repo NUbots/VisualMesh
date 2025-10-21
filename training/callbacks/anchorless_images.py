@@ -7,19 +7,18 @@ import numpy as np
 import tensorflow as tf
 from training.op import map_visual_mesh, unmap_visual_mesh
 from training.projection import project
-from training.dataset.label.anchorless import Anchorless
-
 
 class AnchorlessImages(tf.keras.callbacks.Callback):
-    def __init__(self, output_path, dataset, model, max_distance, geometry, radius, sigma, offset_scale=1.0, use_offsets=True):
+    def __init__(self, output_path, dataset, model, max_distance, geometry, radius, sigma, use_offsets=True):
         super(AnchorlessImages, self).__init__()
-        self.offset_scale = float(offset_scale)
+        self.intersections = geometry.get("intersections", 6)
+        self.offset_scale = 0.5 / float(self.intersections)
         self.use_offsets = use_offsets
 
         self.max_distance = max_distance
         self.radius = radius
         self.sigma = sigma
-        self.map_args = {"model": model, "geometry": geometry, "radius": radius}
+        self.map_args = {"model": model, "geometry": geometry["shape"], "radius": radius}
         self.writer = tf.summary.create_file_writer(os.path.join(output_path, "images"))
 
         # Load the dataset and extract a single record from it
@@ -57,6 +56,8 @@ class AnchorlessImages(tf.keras.callbacks.Callback):
     def _heatmap_overlay(self, heatmap_pred, heatmap_true, nm, Hoc, lens, dims):
         """Create heatmap visualization overlay with custom color scheme."""
 
+        dims_i32 = tf.cast(dims, tf.int32)
+
         # Project mesh points to pixel coordinates
         uPCo = map_visual_mesh(nm, height=Hoc[2, 3], **self.map_args)
         uPCc = tf.einsum("ij,ki->kj", Hoc[:3, :3], uPCo)
@@ -69,7 +70,7 @@ class AnchorlessImages(tf.keras.callbacks.Callback):
         true_filtered = tf.gather(tf.squeeze(heatmap_true, axis=-1), tf.squeeze(tf.where(on_screen), axis=1))
 
         if tf.size(px_filtered) == 0:
-            return tf.zeros((*dims, 3), dtype=tf.float32)
+            return tf.zeros(tf.concat([dims_i32, [3]], axis=0), dtype=tf.float32)
 
         # Amplify heatmap values for better visibility
         pred_amplified = tf.clip_by_value(pred_filtered * 3.0, 0.0, 1.0)
@@ -96,11 +97,11 @@ class AnchorlessImages(tf.keras.callbacks.Callback):
         true_valid = tf.gather(true_expanded, tf.squeeze(tf.where(valid_mask), axis=1))
 
         if tf.size(px_valid) == 0:
-            return tf.zeros((*dims, 3), dtype=tf.float32)
+            return tf.zeros(tf.concat([dims_i32, [3]], axis=0), dtype=tf.float32)
 
         # Ground Truth: White (peak) → Black (edges)
         # Create grayscale overlay where high values are white, low values are black
-        gt_overlay = tf.scatter_nd(px_valid, true_valid, dims)
+        gt_overlay = tf.scatter_nd(px_valid, true_valid, dims_i32)
         gt_overlay = tf.stack([gt_overlay, gt_overlay, gt_overlay], axis=-1)  # RGB all same = grayscale
 
         # Prediction: Red (edges) → Yellow (center)
@@ -108,11 +109,11 @@ class AnchorlessImages(tf.keras.callbacks.Callback):
         # Red channel: always full intensity where there's any prediction
         # Green channel: scales with prediction value (creates the red→yellow gradient)
         pred_red = tf.where(
-            tf.scatter_nd(px_valid, pred_valid, dims) > 0,
+            tf.scatter_nd(px_valid, pred_valid, dims_i32) > 0,
             1.0,  # Full red intensity where any prediction exists
             0.0
         )
-        pred_green = tf.scatter_nd(px_valid, pred_valid, dims)  # Green scales with prediction value
+        pred_green = tf.scatter_nd(px_valid, pred_valid, dims_i32)  # Green scales with prediction value
         pred_blue = tf.zeros_like(pred_red)  # No blue for red→yellow gradient
 
         pred_overlay = tf.stack([pred_red, pred_green, pred_blue], axis=-1)
@@ -186,6 +187,7 @@ class AnchorlessImages(tf.keras.callbacks.Callback):
 
     def _create_detection_ring_overlay(self, Hoc, lens, dims):
         """Create detection range ring overlay."""
+        dims_i32 = tf.cast(dims, tf.int32)
         f = lens["focal_length"]
         uRCo = self._ring(angle=tf.atan(self.max_distance / Hoc[2, 3]), width=2, f=f)
         uRCc = tf.einsum("ij,ki->kj", Hoc[:3, :3], uRCo)
@@ -198,90 +200,59 @@ class AnchorlessImages(tf.keras.callbacks.Callback):
             ring_overlay = tf.scatter_nd(
                 ring_px_filtered,
                 tf.ones_like(ring_px_filtered[:, 0], dtype=tf.float32),
-                dims
+                dims_i32
             )
             ring_overlay = tf.clip_by_value(
                 tf.einsum("ij,k->ijk", ring_overlay, tf.constant([1.0, 1.0, 1.0])),
                 0.0, 1.0
             )
         else:
-            ring_overlay = tf.zeros((*dims, 3), dtype=tf.float32)
+            ring_overlay = tf.zeros(tf.concat([dims_i32, [3]], axis=0), dtype=tf.float32)
 
         return ring_overlay
 
-    def _detect_and_draw_centers(self, hm_true, off_true, hm_pred_prob, off_pred, nm, Hoc, lens, dims, output_img, valid):
-        # For visualization, we need to handle cases where the graph structure might not match
-        # the current nm tensor. Use a safe approach that falls back to simple scaling if needed.
-        try:
-            # Check if graph indices are compatible with current mesh size
-            n_nodes = tf.shape(nm)[0]
-            max_graph_idx = tf.reduce_max(self.G)
-            
-            def safe_scaling():
-                return Anchorless.compute_per_node_scales(nm, valid, self.G)
-            
-            def fallback_scaling():
-                # Use simple constant scaling when graph doesn't match
-                return tf.ones_like(nm[:, 0]) * self.offset_scale
-            
-            # Use safe scaling if indices are valid, fallback otherwise
-            per_node_scales = tf.cond(
-                max_graph_idx < n_nodes,
-                safe_scaling,
-                fallback_scaling
-            )
-        except:
-            # If any error occurs, fall back to simple scaling
-            per_node_scales = tf.ones_like(nm[:, 0]) * self.offset_scale
-        
-        # Flatten
-        hm_true_flat = tf.reshape(hm_true, [-1])     # [N]
-        hm_pred_flat = tf.reshape(hm_pred_prob, [-1])# [N]
+    def clean_detect_and_draw_centers(self, hm_true, off_true, hm_pred_prob, off_pred,
+                                     nm, Hoc, lens, dims, output_img):
+        """Clean center detection and drawing without per-node scales complexity."""
 
-        # 1) Pick GT centers with a threshold, not equality
-        true_where = tf.where(hm_true_flat >= 1.0)  # [K,1]
-        true_idx = tf.cast(tf.reshape(true_where, [-1]), tf.int32)  # [K]
+        # 1) Ground truth centers - find hard peaks (value >= 1.0)
+        hm_true_flat = tf.reshape(hm_true, [-1])  # [N]
+        true_idx = tf.cast(tf.reshape(tf.where(hm_true_flat >= 1.0), [-1]), tf.int32)  # [K]
+        K = tf.shape(true_idx)[0]
 
-        # 2) Compute GT center pixels (node + optional offset)
-        if tf.size(true_idx) > 0:
-            nm_gt  = tf.gather(nm, true_idx)         # [K,2]
-            if self.use_offsets:
-                off_gt = tf.gather(off_true, true_idx)   # [K,2]
-                # Use per-node scales for proper denormalization
-                local_scales_gt = tf.gather(per_node_scales, true_idx)  # [K]
-                local_scales_gt_2d = tf.expand_dims(local_scales_gt, -1)  # [K,1] for broadcasting
-                center_nm_true = nm_gt + off_gt * local_scales_gt_2d * self.offset_scale
-            else:
-                center_nm_true = nm_gt  # Just use the node position
-            true_px = self._nm_to_px(center_nm_true, Hoc, lens, dims)  # np.int32 [K,2]
-        else:
+        # Handle case when no ground truth centers exist
+        if tf.size(true_idx) == 0:
             true_px = np.zeros((0, 2), dtype=np.int32)
-
-        # 3) Pred centers: take top-K probs (K=GT count; fallback to 1)
-        K = int(tf.size(true_idx).numpy())
-        if K <= 0:
-            K = 1
-
-        topk = tf.math.top_k(hm_pred_flat, k=K, sorted=True)
-        pred_idx = tf.cast(topk.indices, tf.int32)  # [K]
-
-        nm_pr  = tf.gather(nm, pred_idx)        # [K,2]
-        if self.use_offsets:
-            off_pr = tf.gather(off_pred, pred_idx)  # [K,2]
-            # Use per-node scales for proper denormalization  
-            local_scales_pr = tf.gather(per_node_scales, pred_idx)  # [K]
-            local_scales_pr_2d = tf.expand_dims(local_scales_pr, -1)  # [K,1] for broadcasting
-            center_nm_pred = nm_pr + off_pr * local_scales_pr_2d * self.offset_scale
         else:
-            center_nm_pred = nm_pr  # Just use the node position
-        pred_px = self._nm_to_px(center_nm_pred, Hoc, lens, dims)
+            nm_gt = tf.gather(nm, true_idx)  # [K,2]
+            if self.use_offsets:
+                off_gt = tf.gather(off_true, true_idx)  # [K,2] in [-1,1]
+                # Simplified denormalization: nm_nodes + off_norm * offset_scale
+                center_nm_true = nm_gt + off_gt * self.offset_scale  # [K,2]
+            else:
+                center_nm_true = nm_gt
+            true_px = self._nm_to_px(center_nm_true, Hoc, lens, dims)  # [K,2] (int32)
 
-        # 4) Draw
+        # 2) Predicted centers - top K by heatmap probability (fallback to at least 1)
+        hm_pred_flat = tf.reshape(hm_pred_prob, [-1])  # [N]
+        K_pred = tf.maximum(K, 1)  # always pick at least 1
+        pred_idx = tf.cast(tf.math.top_k(hm_pred_flat, k=K_pred, sorted=True).indices, tf.int32)  # [K_pred]
+
+        nm_pred = tf.gather(nm, pred_idx)  # [K_pred,2]
+        if self.use_offsets:
+            off_pred_selected = tf.gather(off_pred, pred_idx)  # [K_pred,2] in [-1,1] (tanh output)
+            # Simplified denormalization: nm_nodes + off_norm * offset_scale
+            center_nm_pred = nm_pred + off_pred_selected * self.offset_scale  # [K_pred,2]
+        else:
+            center_nm_pred = nm_pred
+        pred_px = self._nm_to_px(center_nm_pred, Hoc, lens, dims)  # [K_pred,2] (int32)
+
+        # 3) Draw circles using OpenCV
         output_np = (output_img.numpy() * 255.0).astype(np.uint8)
-        output_np = self._draw_circles_cv(output_np, true_px, (255, 255, 255), radius_px=6, thickness=2)  # white GT
-        output_np = self._draw_circles_cv(output_np, pred_px, (0, 0, 0), radius_px=6, thickness=2)        # black predictions
-        return tf.convert_to_tensor(output_np / 255.0, dtype=tf.float32)
+        output_np = self._draw_circles_cv(output_np, true_px, (255, 255, 255), radius_px=6, thickness=2)  # GT white
+        output_np = self._draw_circles_cv(output_np, pred_px, (0, 0, 0), radius_px=6, thickness=2)  # Pred black
 
+        return tf.convert_to_tensor(output_np / 255.0, dtype=tf.float32)
 
     def image(self, img, heatmap_pred, heatmap_true, Hoc, lens, nm, valid):
         """Generate visualization image with GT (white) and Pred (black) centers overlaid."""
@@ -294,7 +265,7 @@ class AnchorlessImages(tf.keras.callbacks.Callback):
             tf.image.decode_image(img, channels=3, expand_animations=False),
             tf.float32,
         )
-        dims = img.shape[:2]   # (H, W)
+        dims = tf.shape(img)[:2]   # Tensor[int32] (H, W)
 
         # Split heatmap channels
         hm_true, off_true, hm_pred_prob, off_pred = self._split_heatmap_channels(heatmap_true, heatmap_pred)
@@ -313,7 +284,7 @@ class AnchorlessImages(tf.keras.callbacks.Callback):
         output = self._blend(self._blend(img, ring_overlay), heatmap_overlay)
 
         # Detect and draw center points
-        output = self._detect_and_draw_centers(hm_true, off_true, hm_pred_prob, off_pred, nm, Hoc, lens, dims, output, valid)
+        output = self.clean_detect_and_draw_centers(hm_true, off_true, hm_pred_prob, off_pred, nm, Hoc, lens, dims, output)
 
         return (img_hash, output)
 

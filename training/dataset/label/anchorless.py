@@ -20,7 +20,7 @@ from training.op import difference_visual_mesh, unmap_visual_mesh
 from training.projection import project
 
 class Anchorless:
-    def __init__(self, sigma, mesh, geometry, offset_scale=1.0, use_offsets=True, **config):
+    def __init__(self, sigma, mesh, geometry, use_offsets=True, **config):
         """
         CenterNet-style ground-truth label generator in Visual Mesh space.
         Produces:
@@ -28,11 +28,14 @@ class Anchorless:
           - center_indices: [num_targets] int vector of peak node ids
         """
         self.sigma = sigma
-        self.offset_scale = offset_scale
         self.use_offsets = use_offsets
         self.mesh_model = mesh["model"]
         self.geometry = tf.constant(geometry["shape"], dtype=tf.string, name="GeometryType")
         self.radius = geometry["radius"]
+
+        # Get intersections from geometry config and compute offset normalization scale
+        self.intersections = geometry.get("intersections", 6)
+        self.offset_scale = 0.5 / float(self.intersections)
 
     def features(self):
         return {
@@ -50,11 +53,13 @@ class Anchorless:
 
         Y = None
         center_indices = None
+        off_mask = None
 
         # No targets → pure background heatmap
         if tf.size(targets) == 0:
             Y = tf.zeros((n_nodes, 3), dtype=tf.float32)
             center_indices = tf.zeros((0,), dtype=tf.int64)
+            off_mask = tf.zeros((n_nodes, 1), dtype=tf.float32)
         else:
             # Filter to on-screen targets
             target_dirs, _ = tf.linalg.normalize(targets, axis=-1)
@@ -65,6 +70,7 @@ class Anchorless:
             if tf.size(targets) == 0:
                 Y = tf.zeros((n_nodes, 3), dtype=tf.float32)
                 center_indices = tf.zeros((0,), dtype=tf.int64)
+                off_mask = tf.zeros((n_nodes, 1), dtype=tf.float32)
             else:
                 # Transform targets into observation-plane camera space and keep only below the camera
                 uOCo, _ = tf.linalg.normalize(tf.einsum("ij,kj->ki", Hoc[:3, :3], targets), axis=-1)
@@ -73,6 +79,7 @@ class Anchorless:
                 if tf.size(uOCo) == 0:
                     Y = tf.zeros((n_nodes, 3), dtype=tf.float32)
                     center_indices = tf.zeros((0,), dtype=tf.int64)
+                    off_mask = tf.zeros((n_nodes, 1), dtype=tf.float32)
                 else:
                     # We have valid targets to process
                     # Visual Mesh args
@@ -109,26 +116,31 @@ class Anchorless:
                     # Final shapes
                     H_gt = tf.expand_dims(H_gt, -1)                              # [N_nodes, 1]
 
+                    off_mask = tf.tensor_scatter_nd_update(
+                        tf.zeros((n_nodes, 1), dtype=H_gt.dtype),
+                        tf.expand_dims(tf.cast(nearest_idx, tf.int32), 1),
+                        tf.ones((tf.shape(nearest_idx)[0], 1), dtype=H_gt.dtype),
+                    )
+
                     if self.use_offsets:
                         center_nm   = tf.gather(mesh_nm, nearest_idx)                      # [T,2]
-                        off_centers = difference_visual_mesh(target_nm, center_nm, **args) # [T,2]
-                        off_centers = tf.clip_by_value(off_centers, -1.0, 1.0)             # optional
+                        raw_off_nm  = difference_visual_mesh(target_nm, center_nm, **args) # [T,2]
+                        scaled_off  = raw_off_nm / self.offset_scale
+                        O_gt        = tf.clip_by_value(scaled_off, -1.0, 1.0)
 
                         offsets = tf.tensor_scatter_nd_update(
                             tf.zeros((n_nodes, 2), dtype=H_gt.dtype),
-                            tf.expand_dims(tf.cast(nearest_idx, tf.int32), axis=1),
-                            off_centers,
+                            tf.expand_dims(tf.cast(nearest_idx, tf.int32), 1),
+                            O_gt,
                         )
-
                         Y = tf.concat([H_gt, offsets], axis=-1)  # [N,3]
-
                     else:
-                        zeros = tf.zeros((n_nodes, 2), dtype=H_gt.dtype)
-                        Y = tf.concat([H_gt, zeros], axis=-1)
+                        Y = tf.concat([H_gt, tf.zeros((n_nodes, 2), dtype=H_gt.dtype)], axis=-1)
 
                     center_indices = tf.cast(nearest_idx, tf.int64)
 
         return {
             "Y": Y,
             "center_indices": center_indices,
+            "off_mask": off_mask,
         }

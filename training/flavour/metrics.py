@@ -46,7 +46,9 @@ def Metrics(config):
     elif config["label"]["type"] == "Anchorless":
         # Anchorless detection metrics based on heatmap peak detection
         use_offsets = config["label"]["config"].get("use_offsets", True)
-        return [
+
+        metrics = [
+            # Traditional PR curves at different thresholds
             AnchorlessPrecision("metrics/precision95", 0.95, use_offsets),
             AnchorlessRecall("metrics/recall95", 0.95, use_offsets),
             AnchorlessPrecision("metrics/precision75", 0.75, use_offsets),
@@ -57,7 +59,24 @@ def Metrics(config):
             AnchorlessRecall("metrics/recall25", 0.25, use_offsets),
             AnchorlessPrecision("metrics/precision10", 0.10, use_offsets),
             AnchorlessRecall("metrics/recall10", 0.10, use_offsets),
+
+            # Peak-to-peak distance evaluation metrics
+            AnchorlessPeakAccuracy("metrics/peak_accuracy"),
+            AnchorlessPeakNodeDistance("metrics/peak_distance_1", distance_threshold=1),
+            AnchorlessPeakNodeDistance("metrics/peak_distance_3", distance_threshold=3),
+            AnchorlessPeakNodeDistance("metrics/peak_distance_5", distance_threshold=5),
+            AnchorlessPeakNodeDistance("metrics/peak_distance_10", distance_threshold=10),
         ]
+
+        # Add offset accuracy metrics if offsets are enabled
+        if use_offsets:
+            metrics.extend([
+                AnchorlessOffsetAccuracy("metrics/offset_accuracy_01", error_threshold=0.1),
+                AnchorlessOffsetAccuracy("metrics/offset_accuracy_05", error_threshold=0.5),
+                AnchorlessOffsetAccuracy("metrics/offset_accuracy_10", error_threshold=1.0),
+            ])
+
+        return metrics
 
     else:
         raise RuntimeError("Cannot create metrics, {} is not a supported  type".format(config["label"]["type"]))

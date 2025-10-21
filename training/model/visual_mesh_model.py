@@ -15,19 +15,16 @@
 
 import tensorflow as tf
 from training.layer import GraphConvolution, DepthwiseSeparableGraphConvolution
-
+from tensorflow.keras.layers import Concatenate
 
 class VisualMeshModel(tf.keras.Model):
     def _apply_variables(self, option):
-        if type(option) is str:
-            if option == "$output_dims":
-                return self.output_dims
-            else:
-                return option
-        elif type(option) is dict:
+        if isinstance(option, str):
+            return self.output_dims if option == "$output_dims" else option
+        elif isinstance(option, dict):
             return {k: self._apply_variables(v) for k, v in option.items()}
-        elif type(option) is list:
-            return {self._apply_variables(v) for v in option}
+        elif isinstance(option, list):
+            return [self._apply_variables(v) for v in option]   # <-- list, not set
         else:
             return option
 
@@ -75,21 +72,21 @@ class VisualMeshModel(tf.keras.Model):
         )
 
     def call(self, X, training=False):
-
-        # Split out the graph and logits
+        # Split inputs
         logits, G = X
-
-        # Run through each of the layers which are sorted in topological order
         results = {"X": logits, "G": G}
+
+        # Execute graph in topological order
         for s in self.stages:
-            # Get the operation and inputs from the list of ops
             op, inputs = self.ops[s]
+            in_tensors = [results[i] for i in inputs]
 
-            # Run the op with the inputs
-            results[s] = op(*[results[i] for i in inputs])
+            # Keras Concatenate expects a single list arg
+            if isinstance(op, tf.keras.layers.Layer) and isinstance(op, Concatenate):
+                results[s] = op(in_tensors)           # pass list
+            else:
+                results[s] = op(*in_tensors)          # pass positional
 
-        # Our output is stored in the "output" member
-        logits = results["output"]
-
-        # At the very end of the network, we remove the offscreen point (last point)
-        return logits[:-1]
+        out = results["output"]   # shape [N, C]
+        out = out[:-1, :]         # drop the last node, keep rank-2
+        return out

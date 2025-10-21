@@ -1,349 +1,73 @@
-# Copyright (C) 2017-2020 Trent Houliston <trent@houliston.me>
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
-# documentation files (the "Software"), to deal in the Software without restriction, including without limitation the
-# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
-# permit persons to whom the Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all copies or substantial portions of the
-# Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
-# WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
-# OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
 import tensorflow as tf
 
+def _split_nc(y):                   # y: [N,3]
+    return y[..., 0:1], y[..., 1:3]  # (hm, offs)
+
+def _pos_mask_from_hm_nc(hm_true, thresh=0.999):
+    return tf.cast(hm_true > thresh, tf.float32)  # [N,1]
+
+def _mean_over_nodes(numer_map, denom_map, eps=1.0):
+    numer = tf.reduce_sum(numer_map, axis=[0, 1])                  # scalar
+    denom = tf.maximum(tf.reduce_sum(denom_map, axis=[0, 1]), eps) # scalar
+    return numer / denom
 
 class AnchorlessLoss:
     """
-    CenterNet-style focal loss for anchorless object detection.
-
-    This loss function handles the extreme class imbalance between object centers
-    and background pixels by:
-    1. Reducing loss for easy negatives (background far from objects)
-    2. Focusing training on hard examples near object boundaries
-    3. Using smooth L1 loss for offset regression (if applicable)
+    Unbatched CenterNet loss.
+      - Heatmap: focal loss from logits (1 ch)
+      - Offsets: masked MSE over positives (2 ch)
+    Call signature:
+      __call__(y_true, y_pred, off_mask=None) -> scalar
+    If off_mask is None, we infer it from hm_true via a high threshold.
     """
-
-    def __init__(self, alpha=2.0, beta=4.0, **kwargs):
-        """
-        Initialize the anchorless loss function.
-
-        Args:
-            alpha: Focal loss exponent for hard negative mining (default: 2.0)
-            beta: Focal loss exponent for positive examples (default: 4.0)
-        """
-        self.alpha = alpha
-        self.beta = beta
-
-    def __call__(self, y_true, y_pred):
-        """
-        Compute the anchorless focal loss.
-
-        Args:
-            y_true: Ground truth [batch_size, num_points, 3] - heatmap + offsets
-            y_pred: Predicted [batch_size, num_points, 3] - heatmap + offsets
-
-        Returns:
-            Scalar loss value
-        """
-        # Extract only the heatmap channel (first channel) for loss computation
-        y_true_hm = y_true[:, :, 0:1]  # [batch_size, num_points, 1]
-        y_pred_hm = y_pred[:, :, 0:1]  # [batch_size, num_points, 1]
-
-        # Ensure predictions are in valid range [0, 1]
-        y_pred_hm = tf.clip_by_value(y_pred_hm, 1e-7, 1.0 - 1e-7)
-
-        # Separate positive and negative examples
-        # Positive: where ground truth > 0 (near object centers)
-        # Negative: where ground truth = 0 (background)
-        pos_mask = tf.cast(tf.greater(y_true_hm, 0.0), tf.float32)
-        neg_mask = tf.cast(tf.equal(y_true_hm, 0.0), tf.float32)
-
-        # Count positive examples for normalization
-        num_pos = tf.maximum(tf.reduce_sum(pos_mask), 1.0)
-
-        # Focal loss for positive examples
-        # When prediction is wrong (y_pred low, y_true high), loss is high
-        pos_loss = -tf.pow(1.0 - y_pred_hm, self.alpha) * tf.math.log(y_pred_hm) * y_true_hm
-        pos_loss = tf.reduce_sum(pos_loss * pos_mask)
-
-        # Focal loss for negative examples
-        # Reduce loss for easy negatives (y_pred already low)
-        # Focus on hard negatives (y_pred high but y_true = 0)
-        neg_loss = -tf.pow(y_pred_hm, self.alpha) * tf.pow(1.0 - y_true_hm, self.beta) * tf.math.log(1.0 - y_pred_hm)
-        neg_loss = tf.reduce_sum(neg_loss * neg_mask)
-
-        # Normalize by number of positive examples
-        total_loss = (pos_loss + neg_loss) / num_pos
-
-        return total_loss
-
-class CenterNetLossLogits:
-    """
-    CenterNet focal loss (logits version).
-    Use this if your network head outputs raw logits (no sigmoid in the model).
-    """
-
-    def __init__(self, alpha=2.0, beta=4.0):
-        self.alpha = alpha
-        self.beta = beta
-
-    def __call__(self, y_true, logits):
-        # Convert logits to probs only for weighting, but use stable cross-entropy
-        p = tf.sigmoid(logits)
-
-        pos_mask = tf.cast(tf.equal(y_true, 1.0), tf.float32)
-        neg_mask = 1.0 - pos_mask
-        neg_weight = tf.pow(1.0 - y_true, self.beta)
-
-        # Positive focal loss
-        pos_loss = -tf.pow(1.0 - p, self.alpha) * tf.math.log_sigmoid(logits) * pos_mask
-        # Negative focal loss
-        neg_loss = -tf.pow(p, self.alpha) * tf.math.log_sigmoid(-logits) * neg_mask * neg_weight
-
-        num_objs = tf.maximum(tf.reduce_sum(pos_mask), 1.0)
-        total = (tf.reduce_sum(pos_loss) + tf.reduce_sum(neg_loss)) / num_objs
-
-        return total
-
-
-class AnchorlessLossWithOffset:
-    """
-    Extended anchorless loss that handles both heatmap and offset regression.
-    This is for the full CenterNet approach with both detection and localization.
-    """
-
-    def __init__(self, alpha=2.0, beta=4.0, offset_weight=1.0, **kwargs):
-        """
-        Initialize the extended anchorless loss function.
-
-        Args:
-            alpha: Focal loss exponent for hard negative mining
-            beta: Focal loss exponent for positive examples
-            offset_weight: Weight for offset regression loss
-        """
+    def __init__(self, alpha=2.0, beta=4.0,
+                 offset_weight=1.0,
+                 hm_peak_thresh=0.999,
+                 reg_pos_thresh=0.999):
         self.alpha = alpha
         self.beta = beta
         self.offset_weight = offset_weight
+        self.hm_peak_thresh = hm_peak_thresh
+        self.reg_pos_thresh = reg_pos_thresh
 
-    def heatmap_loss(self, y_true_hm, y_pred_hm):
-        """Compute focal loss for heatmap prediction."""
-        y_pred_hm = tf.clip_by_value(y_pred_hm, 1e-7, 1.0 - 1e-7)
+    def _focal_heatmap_loss(self, hm_true, hm_logits):
+        x   = tf.clip_by_value(hm_logits, -50.0, 50.0)
+        p   = tf.sigmoid(x)
+        lsp = tf.clip_by_value(tf.math.log_sigmoid(x),  -50.0, 0.0)
+        lsn = tf.clip_by_value(tf.math.log_sigmoid(-x), -50.0, 0.0)
 
-        pos_mask = tf.cast(tf.greater(y_true_hm, 0.0), tf.float32)
-        neg_mask = tf.cast(tf.equal(y_true_hm, 0.0), tf.float32)
-        num_pos = tf.maximum(tf.reduce_sum(pos_mask), 1.0)
-
-        # Positive loss
-        pos_loss = -tf.pow(1.0 - y_pred_hm, self.alpha) * tf.math.log(y_pred_hm) * y_true_hm
-        pos_loss = tf.reduce_sum(pos_loss * pos_mask)
-
-        # Negative loss
-        neg_loss = -tf.pow(y_pred_hm, self.alpha) * tf.pow(1.0 - y_true_hm, self.beta) * tf.math.log(1.0 - y_pred_hm)
-        neg_loss = tf.reduce_sum(neg_loss * neg_mask)
-
-        return (pos_loss + neg_loss) / num_pos
-
-    def offset_loss(self, y_true_hm, y_true_offset, y_pred_offset):
-        """Compute smooth L1 loss for offset regression, only at positive locations."""
-        # Only compute offset loss where we have positive examples
-        pos_mask = tf.cast(tf.greater(y_true_hm, 0.0), tf.float32)
-        num_pos = tf.maximum(tf.reduce_sum(pos_mask), 1.0)
-
-        # Smooth L1 loss (Huber loss with delta=1.0)
-        diff = y_true_offset - y_pred_offset
-        abs_diff = tf.abs(diff)
-
-        smooth_l1 = tf.where(
-            abs_diff < 1.0,
-            0.5 * tf.square(diff),  # L2 loss for small errors
-            abs_diff - 0.5          # L1 loss for large errors
-        )
-
-        # Apply only to positive locations and average over 2D offsets
-        smooth_l1 = tf.reduce_sum(smooth_l1, axis=-1, keepdims=True)  # Sum over x,y dimensions
-        offset_loss = tf.reduce_sum(smooth_l1 * pos_mask) / num_pos
-
-        return offset_loss
-
-    def __call__(self, y_true, y_pred):
-        """
-        Compute combined heatmap + offset loss.
-
-        Expected format:
-        y_true: {"heatmap": [batch, points, 1], "offset": [batch, points, 2]}
-        y_pred: {"heatmap": [batch, points, 1], "offset": [batch, points, 2]}
-
-        Or if using single output:
-        y_true: [batch, points, 3] where [:,:,0] = heatmap, [:,:,1:3] = offset
-        y_pred: [batch, points, 3] where [:,:,0] = heatmap, [:,:,1:3] = offset
-        """
-
-        # Handle dictionary format
-        if isinstance(y_true, dict) and isinstance(y_pred, dict):
-            y_true_hm = y_true["heatmap"]
-            y_true_offset = y_true["offset"]
-            y_pred_hm = y_pred["heatmap"]
-            y_pred_offset = y_pred["offset"]
-        else:
-            # Handle concatenated format [heatmap, offset_x, offset_y]
-            y_true_hm = y_true[..., 0:1]  # [batch, points, 1]
-            y_true_offset = y_true[..., 1:3]  # [batch, points, 2]
-            y_pred_hm = y_pred[..., 0:1]  # [batch, points, 1]
-            y_pred_offset = y_pred[..., 1:3]  # [batch, points, 2]
-
-        # Compute individual losses
-        hm_loss = self.heatmap_loss(y_true_hm, y_pred_hm)
-        off_loss = self.offset_loss(y_true_hm, y_true_offset, y_pred_offset)
-
-        # Combine losses
-        total_loss = hm_loss + self.offset_weight * off_loss
-
-        return total_loss
-
-
-class CenterNetLogitsWithOffsetLoss:
-    def __init__(self, alpha=2.0, beta=4.0, offset_weight=1.0, use_offsets=True):
-        self.alpha = alpha
-        self.beta = beta
-        self.offset_weight = offset_weight
-        self.use_offsets = use_offsets
-
-    @staticmethod
-    def _split(y):
-        # y: [B, N, 3]
-        hm   = y[..., 0:1]  # [B,N,1]
-        offs = y[..., 1:3]  # [B,N,2]
-        return hm, offs
-
-    def heatmap_loss(self, hm_true, hm_logits):
-        # hm_true in [0,1] with hard 1.0 peaks; hm_logits are raw.
-        # Add numerical stability by clipping logits
-        hm_logits = tf.clip_by_value(hm_logits, -50.0, 50.0)
-
-        # Check for invalid inputs
-        if tf.reduce_any(tf.math.is_nan(hm_logits)) or tf.reduce_any(tf.math.is_nan(hm_true)):
-            return tf.constant(0.0, dtype=tf.float32)
-
-        p = tf.sigmoid(hm_logits)
-        pos = tf.cast(tf.equal(hm_true, 1.0), tf.float32)   # peaks only
-        neg = 1.0 - pos
+        pos   = hm_true
+        neg   = 1.0 - pos
         neg_w = tf.pow(1.0 - hm_true, self.beta)
 
-        # Use stable log-sigmoid with additional clipping
-        log_sigmoid_pos = tf.clip_by_value(tf.math.log_sigmoid(hm_logits), -50.0, 0.0)
-        log_sigmoid_neg = tf.clip_by_value(tf.math.log_sigmoid(-hm_logits), -50.0, 0.0)
+        pos_loss = - tf.pow(1.0 - p, self.alpha) * lsp * pos
+        neg_loss = - tf.pow(p,         self.alpha) * lsn * neg * neg_w
+        loss_map = pos_loss + neg_loss                         # [N,1]
 
-        pos_loss = - tf.pow(1.0 - p, self.alpha) * log_sigmoid_pos * pos
-        neg_loss = - tf.pow(p, self.alpha) * log_sigmoid_neg * neg * neg_w
+        obj_map = _pos_mask_from_hm_nc(hm_true, self.hm_peak_thresh)  # [N,1]
+        return _mean_over_nodes(loss_map, obj_map, eps=1.0)
 
-        num_pos = tf.maximum(tf.reduce_sum(pos), 1.0)
+    def _mse_offset_loss(self, off_true, off_pred, off_mask):
+        # off_true/off_pred: [N,2], off_mask: [N,1] in {0,1}
+        sq_err = tf.reduce_sum(tf.square(off_pred - off_true), axis=-1, keepdims=True)  # [N,1]
+        return _mean_over_nodes(sq_err * off_mask, off_mask, eps=1.0)
 
-        # Add numerical stability check
-        pos_sum = tf.reduce_sum(pos_loss)
-        neg_sum = tf.reduce_sum(neg_loss)
+    def __call__(self, y_true, y_pred, off_mask=None):
+        # y_true/y_pred: [N,3]
+        y_true = tf.ensure_shape(y_true, [None, 3])
+        y_pred = tf.ensure_shape(y_pred, [None, 3])
 
-        # Check for NaN/Inf in intermediate results
-        if tf.reduce_any(tf.math.is_nan(pos_sum)) or tf.reduce_any(tf.math.is_nan(neg_sum)):
-            return tf.constant(0.0, dtype=tf.float32)
+        hm_t, off_t      = _split_nc(y_true)   # [N,1], [N,2]
+        hm_logits, off_p = _split_nc(y_pred)   # [N,1], [N,2]
 
-        total_loss = (pos_sum + neg_sum) / num_pos
-
-        # Final safety check
-        return tf.where(tf.math.is_finite(total_loss), total_loss, 0.0)
-
-    def offset_loss(self, hm_true, off_true, off_pred):
-        # supervise offsets only at center nodes (hm_true == 1.0)
-        pos = tf.cast(tf.equal(hm_true, 1.0), tf.float32)         # [B,N,1]
-        # Huber / Smooth-L1 (smaller delta for bounded tanh outputs)
-        diff  = off_pred - off_true                               # [B,N,2]
-        abs_d = tf.abs(diff)
-        delta = 0.5  # Smaller delta since targets/predictions are in [-1, 1]
-        huber = tf.where(abs_d < delta, 0.5*tf.square(diff), delta*abs_d - 0.5*delta*delta)
-        huber = tf.reduce_sum(huber, axis=-1, keepdims=True)      # [B,N,1]
-
-        num_pos = tf.maximum(tf.reduce_sum(pos), 1.0)
-        return tf.reduce_sum(huber * pos) / num_pos
-
-    def __call__(self, y_true, y_pred):
-        hm_t, off_t = self._split(y_true)   # [B,N,1], [B,N,2]
-        hm_p_raw, off_p_raw = self._split(y_pred)   # raw outputs for both
-
-        # Debug: check for NaN/Inf in inputs
-        if tf.reduce_any(tf.math.is_nan(y_true)) or tf.reduce_any(tf.math.is_nan(y_pred)):
-            tf.print("NaN detected in inputs!")
-            return tf.constant(0.0, dtype=tf.float32)
-
-        if tf.reduce_any(tf.math.is_inf(y_true)) or tf.reduce_any(tf.math.is_inf(y_pred)):
-            tf.print("Inf detected in inputs!")
-            return tf.constant(0.0, dtype=tf.float32)
-
-        # Apply appropriate activations:
-        # Heatmap: keep as logits for stable loss computation
-        hm_p = hm_p_raw  # Keep logits for heatmap loss
-        
-        # Offsets: apply tanh to bound to [-1, 1]  
-        off_p = tf.nn.tanh(off_p_raw)  # Apply tanh activation to offset predictions
-
-        # Always compute heatmap loss
-        hm = self.heatmap_loss(hm_t, hm_p)
-
-        # Only compute offset loss if use_offsets is enabled
-        if self.use_offsets:
-            of = self.offset_loss(hm_t, off_t, off_p)
-            total_loss = hm + self.offset_weight * of
+        # If no explicit mask was provided, derive it from hard peaks in hm_true
+        if off_mask is None:
+            off_mask = _pos_mask_from_hm_nc(hm_t, self.reg_pos_thresh)  # [N,1]
         else:
-            total_loss = hm
+            # Ensure float dtype & correct rank
+            off_mask = tf.cast(off_mask, tf.float32)
+            off_mask = tf.ensure_shape(off_mask, [None, 1])
 
-        # Final check
-        if tf.math.is_nan(total_loss) or tf.math.is_inf(total_loss):
-            tf.print("Final loss is NaN/Inf, returning 0")
-            return tf.constant(0.0, dtype=tf.float32)
-
-        return total_loss
-
-
-class AdaptiveAnchorlessLoss:
-    """
-    Adaptive version that automatically balances heatmap and offset losses
-    based on their relative magnitudes during training.
-    """
-
-    def __init__(self, alpha=2.0, beta=4.0, **kwargs):
-        self.alpha = alpha
-        self.beta = beta
-
-        # Learnable loss weights (initialized to equal importance)
-        self.heatmap_weight = tf.Variable(1.0, trainable=True, name="heatmap_weight")
-        self.offset_weight = tf.Variable(1.0, trainable=True, name="offset_weight")
-
-    def __call__(self, y_true, y_pred):
-        """Compute adaptive weighted loss."""
-        # Use the same loss computation as AnchorlessLossWithOffset
-        loss_fn = AnchorlessLossWithOffset(self.alpha, self.beta, 1.0)
-
-        # Handle format conversion
-        if isinstance(y_true, dict):
-            y_true_hm = y_true["heatmap"]
-            y_true_offset = y_true["offset"]
-            y_pred_hm = y_pred["heatmap"]
-            y_pred_offset = y_pred["offset"]
-        else:
-            y_true_hm = y_true[..., 0:1]
-            y_true_offset = y_true[..., 1:3]
-            y_pred_hm = y_pred[..., 0:1]
-            y_pred_offset = y_pred[..., 1:3]
-
-        # Compute individual losses
-        hm_loss = loss_fn.heatmap_loss(y_true_hm, y_pred_hm)
-        off_loss = loss_fn.offset_loss(y_true_hm, y_true_offset, y_pred_offset)
-
-        # Apply learnable weights with softmax normalization
-        weights = tf.nn.softmax([self.heatmap_weight, self.offset_weight])
-
-        total_loss = weights[0] * hm_loss + weights[1] * off_loss
-
-        return total_loss
+        hm_loss  = self._focal_heatmap_loss(hm_t, hm_logits)
+        off_loss = self._mse_offset_loss(off_t, off_p, off_mask)
+        return hm_loss + self.offset_weight * off_loss
