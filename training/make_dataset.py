@@ -77,7 +77,7 @@ def make_tfrecord(output_file, input_files):
                         feature={
                             "image": bytes_feature(image),
                             "mask": bytes_feature(mask),
-                            "seeker/targets": float_list_feature(targets_floats),
+                            "anchorless/targets": float_list_feature(targets_floats),
                             "lens/projection": bytes_feature(lens["projection"].encode("utf-8")),
                             "lens/fov": float_feature(lens["fov"]),
                             "lens/focal_length": float_feature(lens["focal_length"]),

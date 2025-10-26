@@ -39,11 +39,11 @@ class Anchorless:
 
     def features(self):
         return {
-            "seeker/targets": tf.io.FixedLenSequenceFeature([3], tf.float32, allow_missing=True),
+            "anchorless/targets": tf.io.FixedLenSequenceFeature([3], tf.float32, allow_missing=True),
         }
 
     def __call__(self, image, Hoc, V, valid, **features):
-        targets = features["seeker/targets"]
+        targets = features["anchorless/targets"]
         projection = features["lens/projection"]
         focal_length = features["lens/focal_length"]
         centre = features["lens/centre"]

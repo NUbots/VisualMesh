@@ -63,8 +63,8 @@ class AnchorlessPeakNodeDistance(tf.keras.metrics.Metric):
             hm_pred_logits = tf.clip_by_value(hm_pred_logits, -20.0, 20.0)
             hm_pred_prob = tf.nn.sigmoid(hm_pred_logits)
 
-            # Find ground truth center nodes (value >= 0.99)
-            gt_center_indices = tf.where(tf.greater_equal(hm_true, 0.99))[:, 0]
+            # Find ground truth center nodes (value >= 1.0, matching label generation)
+            gt_center_indices = tf.where(tf.greater_equal(hm_true, 1.0))[:, 0]
             num_gt = tf.shape(gt_center_indices)[0]
             self.total_ground_truths.assign_add(num_gt)
 
@@ -121,6 +121,22 @@ class AnchorlessPeakNodeDistance(tf.keras.metrics.Metric):
         self.distance_sum.assign(0.0)
         self.num_distances.assign(0)
 
+    def save(self, output_path):
+        """Save metric results to file."""
+        import os
+        base_path = os.path.join(output_path, "test", self.name)
+        os.makedirs(os.path.dirname(base_path), exist_ok=True)
+
+        with open("{}.txt".format(base_path), "w") as f:
+            accuracy = self.result().numpy()
+            avg_distance = (self.distance_sum.numpy() / max(1, self.num_distances.numpy()))
+
+            f.write("Peak Node Distance Metric (threshold={})\n".format(self.distance_threshold))
+            f.write("Accuracy within threshold: {:.4f}\n".format(accuracy))
+            f.write("Average node distance: {:.2f}\n".format(avg_distance))
+            f.write("Total predictions: {}\n".format(self.total_predictions.numpy()))
+            f.write("Predictions within threshold: {}\n".format(self.within_threshold.numpy()))
+
 
 class AnchorlessPeakAccuracy(tf.keras.metrics.Metric):
     """
@@ -149,8 +165,8 @@ class AnchorlessPeakAccuracy(tf.keras.metrics.Metric):
             hm_pred_logits = tf.clip_by_value(hm_pred_logits, -20.0, 20.0)
             hm_pred_prob = tf.nn.sigmoid(hm_pred_logits)
 
-            # Ground truth centers
-            gt_center_indices = tf.where(tf.greater_equal(hm_true, 0.99))[:, 0]
+            # Ground truth centers (hard peaks >= 1.0, matching label generation)
+            gt_center_indices = tf.where(tf.greater_equal(hm_true, 1.0))[:, 0]
 
             # Check for meaningful predictions
             has_prediction = tf.reduce_max(hm_pred_prob) > 0.01
@@ -188,6 +204,80 @@ class AnchorlessPeakAccuracy(tf.keras.metrics.Metric):
         self.correct_predictions.assign(0)
         self.total_predictions.assign(0)
 
+    def save(self, output_path):
+        """Save metric results to file."""
+        import os
+        base_path = os.path.join(output_path, "test", self.name)
+        os.makedirs(os.path.dirname(base_path), exist_ok=True)
+
+        with open("{}.txt".format(base_path), "w") as f:
+            accuracy = self.result().numpy()
+            f.write("Peak Exact Accuracy Metric\n")
+            f.write("Exact match accuracy: {:.4f}\n".format(accuracy))
+            f.write("Total predictions: {}\n".format(self.total_predictions.numpy()))
+            f.write("Exact matches: {}\n".format(self.correct_predictions.numpy()))
+
+
+class AnchorlessSpatialAccuracy(tf.keras.metrics.Metric):
+    """
+    Spatial distance accuracy for anchorless object detection.
+
+    Measures accuracy based on actual spatial distance in nm coordinates
+    (like what you see in TensorBoard), rather than discrete node indices.
+    This includes offset vector contributions for sub-node precision.
+    """
+
+    def __init__(self, name, distance_threshold=0.1, **kwargs):
+        """
+        Args:
+            name: Metric name
+            distance_threshold: Spatial distance threshold in nm coordinates
+        """
+        super().__init__(name=name, **kwargs)
+        self.distance_threshold = distance_threshold
+
+        self.within_threshold = self.add_weight(name="within_threshold", initializer="zeros", dtype=tf.int32)
+        self.total_predictions = self.add_weight(name="total_predictions", initializer="zeros", dtype=tf.int32)
+        self.distance_sum = self.add_weight(name="distance_sum", initializer="zeros", dtype=tf.float32)
+        self.num_distances = self.add_weight(name="num_distances", initializer="zeros", dtype=tf.int32)
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        """Update with spatial distance measurements."""
+        # This would need mesh vertices (V) and offset scale to work properly
+        # For now, just count as a placeholder - we'll implement this properly
+        return tf.constant(0)
+
+    def result(self):
+        """Return proportion of predictions within spatial threshold."""
+        return tf.cond(
+            self.total_predictions > 0,
+            lambda: tf.cast(self.within_threshold, tf.float32) / tf.cast(self.total_predictions, tf.float32),
+            lambda: tf.constant(0.0, dtype=tf.float32)
+        )
+
+    def reset_state(self):
+        """Reset state."""
+        self.within_threshold.assign(0)
+        self.total_predictions.assign(0)
+        self.distance_sum.assign(0.0)
+        self.num_distances.assign(0)
+
+    def save(self, output_path):
+        """Save metric results to file."""
+        import os
+        base_path = os.path.join(output_path, "test", self.name)
+        os.makedirs(os.path.dirname(base_path), exist_ok=True)
+
+        with open("{}.txt".format(base_path), "w") as f:
+            accuracy = self.result().numpy()
+            avg_distance = (self.distance_sum.numpy() / max(1, self.num_distances.numpy()))
+
+            f.write("Spatial Distance Accuracy (threshold={:.3f})\n".format(self.distance_threshold))
+            f.write("Spatial accuracy: {:.4f}\n".format(accuracy))
+            f.write("Average spatial distance: {:.4f}\n".format(avg_distance))
+            f.write("Total predictions: {}\n".format(self.total_predictions.numpy()))
+            f.write("Predictions within threshold: {}\n".format(self.within_threshold.numpy()))
+
 
 class AnchorlessOffsetAccuracy(tf.keras.metrics.Metric):
     """
@@ -197,16 +287,22 @@ class AnchorlessOffsetAccuracy(tf.keras.metrics.Metric):
     measures the accuracy of the predicted offset vector. This provides
     sub-node precision evaluation for cases where the discrete node
     selection is correct.
+
+    Computes error in Visual Mesh nm coordinate units by unscaling both
+    predicted and ground truth offset vectors.
     """
 
-    def __init__(self, name, error_threshold=0.1, **kwargs):
+    def __init__(self, name, error_threshold=0.1, intersections=6, **kwargs):
         """
         Args:
             name: Metric name
-            error_threshold: Offset error threshold for accuracy calculation
+            error_threshold: Offset error threshold for accuracy calculation (in nm units)
+            intersections: Number of intersections used in offset scaling (default 6)
         """
         super().__init__(name=name, **kwargs)
         self.error_threshold = error_threshold
+        # Offset scale used in labeller: 0.5 / intersections
+        self.offset_scale = 0.5 / float(intersections)
 
         self.offset_error_sum = self.add_weight(name="offset_error_sum", initializer="zeros", dtype=tf.float32)
         self.num_errors = self.add_weight(name="num_errors", initializer="zeros", dtype=tf.int32)
@@ -230,8 +326,8 @@ class AnchorlessOffsetAccuracy(tf.keras.metrics.Metric):
             hm_pred_logits = tf.clip_by_value(hm_pred_logits, -20.0, 20.0)
             hm_pred_prob = tf.nn.sigmoid(hm_pred_logits)
 
-            # Ground truth centers
-            gt_center_indices = tf.where(tf.greater_equal(hm_true, 0.99))[:, 0]
+            # Ground truth centers (hard peaks >= 1.0, matching label generation)
+            gt_center_indices = tf.where(tf.greater_equal(hm_true, 1.0))[:, 0]
 
             # Check for meaningful predictions
             has_prediction = tf.reduce_max(hm_pred_prob) > 0.01
@@ -250,19 +346,23 @@ class AnchorlessOffsetAccuracy(tf.keras.metrics.Metric):
                         # We have an exact node match, evaluate offset accuracy
                         self.total_offsets.assign_add(1)
 
-                        # Get true and predicted offsets at peak location
-                        offset_true_at_peak = offset_true[peak_idx]
-                        offset_pred_at_peak = offset_pred[peak_idx]
+                        # Get true and predicted offsets at peak location (both in scaled space)
+                        offset_true_scaled = offset_true[peak_idx]
+                        offset_pred_scaled = offset_pred[peak_idx]
 
-                        # Compute offset error
-                        offset_error = tf.norm(offset_pred_at_peak - offset_true_at_peak)
+                        # Unscale both offsets to get actual nm coordinate error
+                        offset_true_nm = offset_true_scaled * self.offset_scale
+                        offset_pred_nm = offset_pred_scaled * self.offset_scale
+
+                        # Compute offset error in nm units
+                        offset_error_nm = tf.norm(offset_pred_nm - offset_true_nm)
 
                         # Accumulate error for mean calculation
-                        self.offset_error_sum.assign_add(offset_error)
+                        self.offset_error_sum.assign_add(offset_error_nm)
                         self.num_errors.assign_add(1)
 
-                        # Check if within threshold
-                        self.accurate_offsets.assign_add(tf.cast(offset_error <= self.error_threshold, tf.int32))
+                        # Check if within threshold (threshold is in nm units)
+                        self.accurate_offsets.assign_add(tf.cast(offset_error_nm <= self.error_threshold, tf.int32))
                         return tf.constant(0)
 
                     return tf.cond(has_exact_match, evaluate_offset, lambda: tf.constant(0))
@@ -289,3 +389,20 @@ class AnchorlessOffsetAccuracy(tf.keras.metrics.Metric):
         self.num_errors.assign(0)
         self.accurate_offsets.assign(0)
         self.total_offsets.assign(0)
+
+    def save(self, output_path):
+        """Save metric results to file."""
+        import os
+        base_path = os.path.join(output_path, "test", self.name)
+        os.makedirs(os.path.dirname(base_path), exist_ok=True)
+
+        with open("{}.txt".format(base_path), "w") as f:
+            accuracy = self.result().numpy()
+            avg_error = (self.offset_error_sum.numpy() / max(1, self.num_errors.numpy()))
+
+            f.write("Offset Accuracy Metric (threshold={:.3f} nm)\n".format(self.error_threshold))
+            f.write("Offset accuracy: {:.4f}\n".format(accuracy))
+            f.write("Average offset error: {:.4f} nm\n".format(avg_error))
+            f.write("Total offset evaluations: {}\n".format(self.total_offsets.numpy()))
+            f.write("Accurate offsets: {}\n".format(self.accurate_offsets.numpy()))
+            f.write("Offset scale used: {:.6f}\n".format(self.offset_scale))

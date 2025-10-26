@@ -16,6 +16,7 @@
 from training.metrics.test.seeker_hourglass import SeekerHourglass
 import training.metrics.test.confusion_curve as confusion
 from training.metrics.test import Confusion, ConfusionCurve, AnchorlessPRCurve
+from training.metrics import AnchorlessPeakNodeDistance, AnchorlessPeakAccuracy, AnchorlessOffsetAccuracy
 
 
 def TestMetrics(config):
@@ -152,9 +153,35 @@ def TestMetrics(config):
     elif config["label"]["type"] == "Anchorless":
         # Anchorless precision-recall curve for test evaluation
         use_offsets = config["label"]["config"].get("use_offsets", True)
-        return [
+
+        # Create comprehensive test metrics for anchorless detection
+        test_metrics = [
+            # Traditional PR curve for confusion matrix analysis
             AnchorlessPRCurve(name="metrics/curves/precision_recall", use_offsets=use_offsets),
+
+            # Peak-based distance metrics for center localization accuracy
+            AnchorlessPeakNodeDistance(name="metrics/peak_node_distance", distance_threshold=5),
+            AnchorlessPeakNodeDistance(name="metrics/peak_node_distance_strict", distance_threshold=2),
+            AnchorlessPeakNodeDistance(name="metrics/peak_node_distance_loose", distance_threshold=10),
+
+            # Exact peak accuracy (node distance = 0)
+            AnchorlessPeakAccuracy(name="metrics/peak_exact_accuracy"),
+
+            # Offset prediction accuracy (if offsets are enabled)
         ]
+
+        if use_offsets:
+            # Get intersections from config for proper offset scaling
+            intersections = config["projection"]["config"].get("intersections", 6)
+            # Set threshold to half the distance between intersections (more reasonable)
+            # offset_scale = 0.5 / intersections, so half intersection = offset_scale / 2
+            offset_scale = 0.5 / intersections
+            reasonable_threshold = offset_scale / 2.0  # Half intersection spacing
+            test_metrics.append(
+                AnchorlessOffsetAccuracy(name="metrics/offset_accuracy", error_threshold=reasonable_threshold, intersections=intersections)
+            )
+
+        return test_metrics
 
     elif config["label"]["type"] == "Seeker":
         return [
